@@ -440,22 +440,6 @@ class TtsEngine {
         await humanDelay(1500, 2500);
 
         while (true) {
-          // Deteksi dini error banner dari Google AI Studio (misal 403 / Rate Limit / No speakers detected)
-          const onScreenError = await page.evaluate(() => {
-            const errorNodes = document.querySelectorAll('mat-snack-bar-container, .error-message, [role="alert"], ms-banner');
-            for (const el of errorNodes) {
-              const txt = el.innerText.trim();
-              if (txt && (txt.includes('403') || txt.includes('400') || txt.includes('500') || txt.toLowerCase().includes('permission denied') || txt.toLowerCase().includes('rate limit') || txt.toLowerCase().includes('no speakers detected'))) {
-                return txt.replace(/\s+/g, ' ');
-              }
-            }
-            return null;
-          }).catch(() => null);
-
-          if (onScreenError) {
-            throw new Error(`[Google AI Studio Rejection]: "${onScreenError}". Silakan periksa format naskah atau kuota harian akun Google.`);
-          }
-
           const elapsedSec = Math.floor((Date.now() - genStartTime) / 1000);
 
           // Cek status lengkap UI dengan membandingkan terhadap baselineAudioSnapshot
@@ -521,9 +505,20 @@ class TtsEngine {
               }
             }
 
-            // Fallback: Jika baseline benar-benar kosong sejak awal
-            if (!targetAudio && (!baseline || baseline.length === 0)) {
+            // Fallback: Jika baseline kosong atau audio player siap
+            if (!targetAudio) {
               targetAudio = audios.filter(a => (a.currentSrc || a.src || '').startsWith('blob:') && a.readyState >= 1).pop() || null;
+            }
+
+            // 6. Cek pesan error banner
+            let errorMessage = null;
+            const errorNodes = document.querySelectorAll('mat-snack-bar-container, .error-message, [role="alert"], ms-banner');
+            for (const el of errorNodes) {
+              const txt = el.innerText.trim();
+              if (txt && (txt.includes('403') || txt.includes('400') || txt.includes('500') || txt.toLowerCase().includes('permission denied') || txt.toLowerCase().includes('rate limit') || txt.toLowerCase().includes('no speakers detected'))) {
+                errorMessage = txt.replace(/\s+/g, ' ');
+                break;
+              }
             }
 
             return {
@@ -532,7 +527,8 @@ class TtsEngine {
               isRunReady,
               isDownloadBtnReady,
               targetAudio,
-              isNewAudioReady: Boolean(targetAudio)
+              isNewAudioReady: Boolean(targetAudio),
+              errorMessage
             };
           }, baselineAudioSnapshot).catch(() => ({
             hasSpinner: true,
@@ -540,11 +536,12 @@ class TtsEngine {
             isRunReady: false,
             isDownloadBtnReady: false,
             targetAudio: null,
-            isNewAudioReady: false
+            isNewAudioReady: false,
+            errorMessage: null
           }));
 
-          // Kondisi selesai: Audio baru siap, spinner hilang, tidak ada tombol stop, tombol Run/Download siap, dan minimal 4 detik
-          const isProcessingFinished = uiState.isNewAudioReady && !uiState.hasSpinner && !uiState.hasStop && (uiState.isRunReady || uiState.isDownloadBtnReady) && elapsedSec >= 4;
+          // KONDISI 1 (SUKSES): Jika audio sudah siap di player, atau tombol Download siap, atau spinner selesai dan tombol Run kembali aktif
+          const isProcessingFinished = (uiState.isNewAudioReady || uiState.isDownloadBtnReady || (uiState.isRunReady && !uiState.hasSpinner)) && !uiState.hasStop && elapsedSec >= 3;
 
           if (isProcessingFinished) {
             detectedTargetAudio = uiState.targetAudio;
@@ -553,6 +550,11 @@ class TtsEngine {
               console.log(`[TtsEngine] [TTS] Audio Blob baru terdeteksi: ${detectedTargetAudio.currentSrc || detectedTargetAudio.src} | Durasi: ${detectedTargetAudio.duration || 0}s`);
             }
             break;
+          }
+
+          // KONDISI 2 (ERROR FATAL): Hanya lempar error jika TIDAK ADA audio yang berhasil terbuat setelah spinner berhenti
+          if (uiState.errorMessage && !uiState.hasSpinner && !uiState.isNewAudioReady && elapsedSec >= 6) {
+            throw new Error(`[Google AI Studio Rejection]: "${uiState.errorMessage}". Silakan periksa format naskah atau kuota harian akun Google.`);
           }
 
           if (elapsedSec - lastReportSec >= 5) {

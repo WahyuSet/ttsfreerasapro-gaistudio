@@ -1,5 +1,122 @@
 [
   {
+    "id": "job_1788858961304_1679a8db",
+    "status": "completed",
+    "progress": 100,
+    "stage": "completed",
+    "message": "Pekerjaan selesai! Berkas audio siap diunduh.",
+    "currentPart": 0,
+    "totalParts": 0,
+    "params": {
+      "text": "Generate async test",
+      "textLength": 19,
+      "wordCount": 3,
+      "voice": "Achernar",
+      "style": "Vocal Smile",
+      "pace": "Natural",
+      "accent": "Neutral",
+      "scene": "A modern study room, explaining everyday science concepts to curious peers.",
+      "sampleContext": "Warm, encouraging, speaking like an older sibling sharing cool trivia, upbeat yet gentle pacing.",
+      "persona": "A relaxed and engaging storyteller, talking like a close friend sharing cool trivia, upbeat and lighthearted.",
+      "autoChunk": true,
+      "maxWordsPerChunk": 300
+    },
+    "result": {
+      "success": true,
+      "totalChunks": 1,
+      "voiceSettings": {
+        "voice": "Achernar",
+        "style": "Vocal Smile"
+      },
+      "files": [
+        {
+          "filename": "server_test_audio.wav",
+          "downloadUrl": "/api/tts/download/server_test_audio.wav",
+          "sizeBytes": 2048,
+          "sizeKb": "2.0"
+        }
+      ]
+    },
+    "error": null,
+    "createdAt": "2026-09-08T09:16:01.304Z",
+    "startedAt": "2026-09-08T09:16:01.307Z",
+    "completedAt": "2026-09-08T09:16:01.309Z",
+    "durationSeconds": 0
+  },
+  {
+    "id": "job_1788858961232_cdb80127",
+    "status": "completed",
+    "progress": 100,
+    "stage": "completed",
+    "message": "Pekerjaan selesai! Berkas audio siap diunduh.",
+    "currentPart": 0,
+    "totalParts": 0,
+    "params": {
+      "text": "Pengujian endpoint REST API Jobs",
+      "textLength": 32,
+      "wordCount": 5,
+      "voice": "Achernar",
+      "style": "Vocal Smile",
+      "pace": "Natural",
+      "accent": "Neutral",
+      "scene": "A modern study room, explaining everyday science concepts to curious peers.",
+      "sampleContext": "Warm, encouraging, speaking like an older sibling sharing cool trivia, upbeat yet gentle pacing.",
+      "persona": "A relaxed and engaging storyteller, talking like a close friend sharing cool trivia, upbeat and lighthearted.",
+      "autoChunk": true,
+      "maxWordsPerChunk": 300
+    },
+    "result": {
+      "success": true,
+      "totalChunks": 1,
+      "voiceSettings": {
+        "voice": "Achernar",
+        "style": "Vocal Smile"
+      },
+      "files": [
+        {
+          "filename": "server_test_audio.wav",
+          "downloadUrl": "/api/tts/download/server_test_audio.wav",
+          "sizeBytes": 2048,
+          "sizeKb": "2.0"
+        }
+      ]
+    },
+    "error": null,
+    "createdAt": "2026-09-08T09:16:01.232Z",
+    "startedAt": "2026-09-08T09:16:01.241Z",
+    "completedAt": "2026-09-08T09:16:01.244Z",
+    "durationSeconds": 0
+  },
+  {
+    "id": "job_1788858869080_1ad8e928",
+    "status": "failed",
+    "progress": 5,
+    "stage": "initializing",
+    "message": "Memulai proses browser automasi...",
+    "currentPart": 0,
+    "totalParts": 0,
+    "params": {
+      "text": "Halo semuanya!",
+      "textLength": 14,
+      "wordCount": 2,
+      "voice": "Achernar",
+      "style": "Vocal Smile",
+      "pace": "Natural",
+      "accent": "Neutral",
+      "scene": "A modern study room, explaining everyday science concepts to curious peers.",
+      "sampleContext": "Warm, encouraging, speaking like an older sibling sharing cool trivia, upbeat yet gentle pacing.",
+      "persona": "A relaxed and engaging storyteller, talking like a close friend sharing cool trivia, upbeat and lighthearted.",
+      "autoChunk": true,
+      "maxWordsPerChunk": 300
+    },
+    "result": null,
+    "error": "Server dimatikan atau direstart sebelum pekerjaan selesai.",
+    "createdAt": "2026-09-08T09:14:29.080Z",
+    "startedAt": "2026-09-08T09:14:29.084Z",
+    "completedAt": "2026-09-08T09:16:01.058Z",
+    "durationSeconds": null
+  },
+  {
     "id": "job_1788858377099_73b5eca4",
     "status": "completed",
     "progress": 100,
