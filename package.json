@@ -1,0 +1,25 @@
+{
+  "name": "austudio-playwright",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "record": "node cli.js",
+    "test:stealth": "node test/test-stealth.js",
+    "test:jobs": "node test/test-jobs-api.js",
+    "test": "node test/test-jobs-api.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.2.1",
+    "open": "^11.0.2",
+    "playwright": "^1.63.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "ws": "^8.21.3"
+  }
+}

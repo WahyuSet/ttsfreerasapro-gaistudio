@@ -1,0 +1,10 @@
+node_modules/
+profiles/
+downloads/*.wav
+downloads/*.png
+recordings/
+scratch/
+.env
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
