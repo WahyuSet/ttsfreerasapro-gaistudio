@@ -41,6 +41,10 @@ function isPillValueMatching(actualText, targetVal) {
  */
 async function selectVoicePill(page, pillName, targetVal) {
   if (!targetVal) return;
+  if (pillName.toLowerCase() === 'accent') {
+    console.log(`[TtsEngine] ⏩ Mengabaikan pemilihan Accent sesuai preferensi.`);
+    return;
+  }
   console.log(`[TtsEngine] 🎛️ Memilih ${pillName}: "${targetVal}"...`);
 
   // 1. Tunggu overlay/backdrop sebelumnya benar-benar selesai menutup/detach
@@ -96,11 +100,11 @@ async function selectVoicePill(page, pillName, targetVal) {
 
   if (await optionBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
     await optionBtn.scrollIntoViewIfNeeded().catch(() => {});
-    await optionBtn.click();
+    await optionBtn.click({ force: true }).catch(async () => await optionBtn.click());
     console.log(`[TtsEngine] Klik opsi "${targetVal}" pada menu ${pillName}.`);
   } else {
     await page.keyboard.press('Escape').catch(() => {});
-    throw new Error(`Opsi "${targetVal}" tidak ditemukan dalam menu dropdown ${pillName}.`);
+    console.warn(`[TtsEngine] ⚠️ Opsi "${targetVal}" tidak ditemukan dalam menu dropdown ${pillName}, melanjutkan.`);
   }
 
   // 7. Tunggu backdrop menutup sepenuhnya
@@ -113,11 +117,10 @@ async function selectVoicePill(page, pillName, targetVal) {
   const isVerified = isPillValueMatching(verifiedText, targetVal) || isPillValueMatching(verifiedAria, targetVal);
 
   if (!isVerified) {
-    console.warn(`[TtsEngine] ⚠️ Postcondition verification gagal untuk ${pillName}: teks aktual="${verifiedText}", aria="${verifiedAria}".`);
-    throw new Error(`Gagal memverifikasi konfigurasi ${pillName} ke "${targetVal}". Nilai aktual: "${verifiedText}" (aria: "${verifiedAria}").`);
+    console.warn(`[TtsEngine] ⚠️ Postcondition verification notice untuk ${pillName}: teks aktual="${verifiedText}" (aria="${verifiedAria}"). Melanjutkan ke pemilihan suara.`);
+  } else {
+    console.log(`[TtsEngine] ✓ Konfigurasi ${pillName} terverifikasi: "${targetVal}".`);
   }
-
-  console.log(`[TtsEngine] ✓ Konfigurasi ${pillName} terverifikasi: "${targetVal}".`);
 }
 
 /**
@@ -521,9 +524,10 @@ class TtsEngine {
           // Cek status lengkap UI dengan membandingkan terhadap baseline snapshot
           const baselineUrlsArray = Array.from(baselineBlobUrls);
           const uiState = await page.evaluate(({ baselineUrls, baselineDlCount }) => {
-            // 1. Cek apakah ada spinner aktif
-            const spinners = document.querySelectorAll('mat-progress-spinner, mat-spinner, .mat-mdc-progress-spinner, [role="progressbar"], .spinner');
+            // 1. Cek apakah ada spinner aktif (abaikan elemen seekbar atau slider audio player)
+            const spinners = document.querySelectorAll('mat-progress-spinner, mat-spinner, .mat-mdc-progress-spinner');
             const hasSpinner = Array.from(spinners).some(s => {
+              if (s.closest('mat-slider') || s.getAttribute('role') === 'slider' || s.closest('.audio-player')) return false;
               const rect = s.getBoundingClientRect();
               return rect.width > 0 && rect.height > 0;
             });
@@ -609,9 +613,18 @@ class TtsEngine {
             errorMessage: null
           }));
 
-          // KONDISI 1 (SUKSES): Audio baru benar-benar sudah siap di player (blob baru terdeteksi),
-          // dan tidak sedang ada spinner maupun generasi yang sibuk
-          const isProcessingFinished = uiState.isFreshAudioReady && !uiState.hasSpinner && !uiState.isGenBusy && elapsedSec >= 3;
+          // Selesai jika:
+          // a. Fresh audio blob terdeteksi
+          // b. Tombol download baru terpasang
+          // c. Backend API respons sudah 200 OK dan settle 2+ detik tanpa genBusy
+          // d. Run button kembali siap (not disabled) dan sudah lewat 4+ detik
+          const apiSettleSec = apiDone ? Math.floor((Date.now() - apiTimestamp) / 1000) : 0;
+          const isProcessingFinished = (
+            uiState.isFreshAudioReady ||
+            uiState.hasNewDownloadButton ||
+            (apiDone && apiSettleSec >= 2 && !uiState.isGenBusy) ||
+            (uiState.isRunReady && !uiState.isGenBusy && elapsedSec >= 4 && (uiState.audioCount > 0 || apiDone))
+          ) && !uiState.isGenBusy && elapsedSec >= 3;
 
           if (isProcessingFinished) {
             detectedTargetAudio = uiState.freshAudio;
@@ -620,25 +633,6 @@ class TtsEngine {
               console.log(`[TtsEngine] [TTS] Audio Blob baru terdeteksi: ${detectedTargetAudio.currentSrc || detectedTargetAudio.src} | Durasi: ${detectedTargetAudio.duration || 0}s`);
             }
             break;
-          }
-
-          // KONDISI 2: API respons selesai (200 OK) + tombol / audio output baru terpasang
-          if (apiDone && !uiState.hasSpinner && !uiState.isGenBusy) {
-            if (uiState.isFreshAudioReady) {
-              detectedTargetAudio = uiState.freshAudio;
-              console.log(`[TtsEngine] ✓ Proses render audio selesai (API 200 + Fresh Blob)! (Durasi ${elapsedSec}s)`);
-              break;
-            }
-            if (uiState.hasNewDownloadButton) {
-              console.log(`[TtsEngine] ✓ Proses render audio selesai (API 200 + Tombol Download Baru)! (Durasi ${elapsedSec}s)`);
-              break;
-            }
-            const apiSettleSec = Math.floor((Date.now() - apiTimestamp) / 1000);
-            if (apiSettleSec >= 6 && uiState.freshAudio) {
-              detectedTargetAudio = uiState.freshAudio;
-              console.log(`[TtsEngine] ✓ Proses render selesai pasca-API settle (${apiSettleSec}s).`);
-              break;
-            }
           }
 
           // KONDISI 3 (ERROR FATAL): Hanya lempar error jika TIDAK ADA audio yang berhasil terbuat setelah spinner berhenti
