@@ -76,7 +76,7 @@ class TtsEngine {
     const { context } = await launchStealthChrome({
       userDataDir: this.profilesDir,
       headless: false,
-      extraArgs: ['--start-maximized']
+      offscreen: true
     });
 
     const page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();

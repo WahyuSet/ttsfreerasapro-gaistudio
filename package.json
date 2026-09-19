@@ -1,17 +1,20 @@
 {
-  "name": "austudio-playwright",
+  "name": "aistudiotts-playwright",
   "version": "1.0.0",
-  "description": "",
+  "description": "Playwright automation service for Google AI Studio Text to Speech",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "login": "node login.js",
+    "server": "node src/server.js",
+    "open-browser": "node src/openBrowser.js",
+    "openBrowser": "node src/openBrowser.js",
+    "login": "node src/openBrowser.js",
     "record": "node cli.js",
     "test:api": "node test/hit-tts-api.js",
     "test:stealth": "node test/test-stealth.js",
     "test:jobs": "node test/test-jobs-api.js",
     "test:recovery": "node test/test-tts-recovery.js",
-    "test": "node test/test-jobs-api.js && node test/test-tts-recovery.js"
+    "test": "node test/hit-tts-api.js"
   },
   "keywords": [],
   "author": "",

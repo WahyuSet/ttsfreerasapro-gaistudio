@@ -25,14 +25,59 @@ function findWindowsChromePath() {
 }
 
 /**
+ * Sinkronisasi preferensi penempatan jendela Chrome di Default/Preferences
+ * Agar posisi off-screen tidak tersimpan permanen saat pengguna ingin membuka browser secara normal
+ */
+function syncWindowPlacementPref(userDataDir, offscreen) {
+  const prefsPath = path.join(userDataDir, 'Default', 'Preferences');
+  try {
+    if (!fs.existsSync(prefsPath)) return;
+    const raw = fs.readFileSync(prefsPath, 'utf8');
+    const prefs = JSON.parse(raw);
+    if (!prefs.browser) prefs.browser = {};
+    if (!prefs.browser.window_placement) prefs.browser.window_placement = {};
+
+    if (!prefs.profile) prefs.profile = {};
+    prefs.profile.exit_type = 'Normal';
+    prefs.profile.exited_cleanly = true;
+
+    if (!prefs.download) prefs.download = {};
+    prefs.download.prompt_for_download = false;
+
+    if (offscreen) {
+      prefs.browser.window_placement.left = -10000;
+      prefs.browser.window_placement.top = -10000;
+      prefs.browser.window_placement.right = -8560;
+      prefs.browser.window_placement.bottom = -9100;
+      prefs.browser.window_placement.maximized = false;
+    } else {
+      if (
+        typeof prefs.browser.window_placement.left === 'number' &&
+        (prefs.browser.window_placement.left < 0 || prefs.browser.window_placement.top < 0)
+      ) {
+        prefs.browser.window_placement.left = 100;
+        prefs.browser.window_placement.top = 50;
+        prefs.browser.window_placement.right = 1540;
+        prefs.browser.window_placement.bottom = 950;
+        prefs.browser.window_placement.maximized = false;
+      }
+    }
+    fs.writeFileSync(prefsPath, JSON.stringify(prefs));
+  } catch {
+    // Abaikan jika preferensi belum ada
+  }
+}
+
+/**
  * Launch Stealth Windows Chrome with persistent context or standard context
  */
 async function launchStealthChrome(options = {}) {
   const {
     userDataDir = path.resolve(__dirname, '..', 'profiles', 'default'),
     headless = false,
-    viewport = null, // null allows full window size with --start-maximized
-    muteAudio = true, // Mute browser audio output so automation runs silently
+    offscreen = true,
+    viewport = null,
+    muteAudio = true,
     extraArgs = []
   } = options;
 
@@ -43,13 +88,22 @@ async function launchStealthChrome(options = {}) {
     fs.mkdirSync(userDataDir, { recursive: true });
   }
 
+  // Sinkronkan preferensi window placement sebelum Chrome dibuka
+  syncWindowPlacementPref(userDataDir, offscreen);
+
   const defaultArgs = [
     '--disable-blink-features=AutomationControlled',
     '--disable-infobars',
     '--no-first-run',
     '--no-default-browser-check',
-    '--start-maximized',
+    '--disable-gpu',
+    '--disable-gpu-compositing',
+    '--disable-features=DownloadBubble,DownloadBubbleV2,CalculateNativeWinOcclusion',
+    '--disable-backgrounding-occluded-windows',
     ...(muteAudio ? ['--mute-audio'] : []),
+    ...(offscreen && !headless
+      ? ['--window-position=-10000,-10000', '--window-size=1440,900']
+      : ['--start-maximized']),
     ...extraArgs
   ];
 

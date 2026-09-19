@@ -10,9 +10,9 @@ const fs = require('fs');
 const { loadEnv, DEFAULT_API_KEY } = require('../src/auth');
 
 loadEnv();
-const PORT = process.env.PORT || 3001;
-const API_KEY = process.env.AUSTUDIO_API_KEY || DEFAULT_API_KEY;
-const HOST = 'localhost';
+const PORT = process.env.PORT || 3740;
+const API_KEY = process.env.API_KEY || process.env.AUSTUDIO_API_KEY || DEFAULT_API_KEY;
+const HOST = '127.0.0.1';
 
 function httpRequest(options, postData = null) {
   return new Promise((resolve, reject) => {
@@ -38,7 +38,7 @@ function httpRequest(options, postData = null) {
 
 async function main() {
   console.log('================================================================');
-  console.log('  AuStudio - Test Client REST API TTS (Teknik Jobs)');
+  console.log('  Google AI Studio TTS - Test Client REST API (Teknik Jobs)');
   console.log(`  Server Target: http://${HOST}:${PORT}`);
   console.log(`  API Key: ${API_KEY.slice(0, 6)}...${API_KEY.slice(-4)}`);
   console.log('================================================================\n');
@@ -53,8 +53,8 @@ async function main() {
       method: 'GET'
     });
 
-    if (health.status !== 200 || !health.data || health.data.status !== 'healthy') {
-      console.error('[Error] Server tidak merespons status healthy.');
+    if (health.status !== 200 || !health.data || (health.data.status !== 'healthy' && health.data.status !== 'ok')) {
+      console.error('[Error] Server tidak merespons status healthy/ok.');
       console.log('Respons:', health);
       process.exit(1);
     }

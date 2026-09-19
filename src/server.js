@@ -5,7 +5,7 @@ const { WebSocketServer } = require('ws');
 const { RecorderEngine } = require('./recorder-engine');
 const { ScriptRunner } = require('./runner');
 const { findWindowsChromePath } = require('./stealth-browser');
-const { DEFAULT_API_KEY } = require('./auth');
+const { DEFAULT_API_KEY, apiKeyAuth } = require('./auth');
 const { TtsEngine } = require('./tts-engine');
 const { JobManager } = require('./job-manager');
 const { createTtsRouter } = require('./routes/tts-routes');
@@ -15,7 +15,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3740;
 
 process.on('uncaughtException', (err) => {
   console.error('[CRITICAL] Server uncaughtException:', err?.message || err);
@@ -64,10 +64,11 @@ jobManager.on('job:cancelled', (job) => broadcast('job_cancelled', job));
 // Health Check
 app.get(['/health', '/api/health'], (req, res) => {
   res.json({
-    status: 'healthy',
-    service: 'AuStudio Gemini TTS API',
+    status: 'ok',
+    service: 'Google AI Studio TTS API',
     uptimeSeconds: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
+    authRequired: true,
     jobs: jobManager.getStats(),
     ttsEngine: {
       isBusy: ttsEngine.isBusy || jobManager.isProcessing,
@@ -93,12 +94,28 @@ app.get('/api/status', (req, res) => {
 app.use('/api/tts', createTtsRouter({ jobManager, ttsEngine, getBaseUrl }));
 app.use('/api', createRecorderRouter({ recorder, runner }));
 
+// Graceful Shutdown Endpoint for local runner
+app.post('/shutdown', apiKeyAuth, (req, res) => {
+  const remote = req.socket.remoteAddress || '';
+  const isLoopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
+  if (!isLoopback) {
+    return res.status(403).json({ error: 'Shutdown hanya diizinkan dari localhost.' });
+  }
+  res.status(202).json({ status: 'shutting_down' });
+  res.once('finish', () => {
+    console.log('[Server] Permintaan shutdown diterima dari local runner. Menghentikan service...');
+    server.close(() => {
+      process.exit(0);
+    });
+  });
+});
+
 function startServer(port) {
   const srv = server.listen(port, () => {
     console.log('====================================================');
-    console.log('AuStudio Playwright - Stealth TTS & Recorder Server');
+    console.log('Google AI Studio TTS - Playwright Automation Server');
     console.log(`URL: http://localhost:${port}`);
-    console.log(`API Key Auth: Aktif (${process.env.AUSTUDIO_API_KEY ? 'Custom Key' : 'Default Key: ' + DEFAULT_API_KEY})`);
+    console.log(`API Key Auth: Aktif (${process.env.API_KEY || process.env.AUSTUDIO_API_KEY ? 'Custom Key' : 'Default Key: ' + DEFAULT_API_KEY})`);
     console.log(`TTS Jobs Endpoint: POST http://localhost:${port}/api/tts/jobs`);
     console.log(`TTS Jobs Status:   GET  http://localhost:${port}/api/tts/jobs/:id`);
     console.log('Stealth Engine: Aktif (Anti-bot detection bypass)');
@@ -117,7 +134,7 @@ function startServer(port) {
 }
 
 if (require.main === module) {
-  startServer(Number(PORT) || 3000);
+  startServer(Number(PORT) || 3740);
 }
 
 module.exports = { app, server, startServer, jobManager, ttsEngine };

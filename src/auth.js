@@ -22,7 +22,7 @@ function loadEnv() {
 
 loadEnv();
 
-const DEFAULT_API_KEY = process.env.AISTUDION_API_KEY || process.env.AISTUDIO_API_KEY || process.env.AUSTUDIO_API_KEY || 'IkPzTzClQrVGj73OMWIm7TPkRTHnlj7M';
+const DEFAULT_API_KEY = process.env.API_KEY || process.env.AISTUDION_API_KEY || process.env.AISTUDIO_API_KEY || process.env.AUSTUDIO_API_KEY || 'IkPzTzClQrVGj73OMWIm7TPkRTHnlj7M';
 
 /**
  * Middleware to protect API routes with API Key
@@ -44,18 +44,21 @@ function apiKeyAuth(req, res, next) {
       clientKey = req.headers.authorization;
     }
   }
-  // 3. Query string '?api_key=...'
+  // 3. Query string '?key=...' or '?api_key=...'
+  else if (req.query.key) {
+    clientKey = req.query.key;
+  }
   else if (req.query.api_key) {
     clientKey = req.query.api_key;
   }
 
-  const expectedKey = process.env.AISTUDION_API_KEY || process.env.AISTUDIO_API_KEY || process.env.AUSTUDIO_API_KEY || DEFAULT_API_KEY;
+  const expectedKey = process.env.API_KEY || process.env.AISTUDION_API_KEY || process.env.AISTUDIO_API_KEY || process.env.AUSTUDIO_API_KEY || DEFAULT_API_KEY;
 
   if (!clientKey) {
     return res.status(401).json({
       success: false,
       error: 'Unauthorized: Missing API Key.',
-      message: 'Sertakan API Key via header "x-api-key", "Authorization: Bearer <KEY>", atau query "?api_key=<KEY>".'
+      message: 'Sertakan API Key via header "x-api-key", "Authorization: Bearer <KEY>", atau query "?key=<KEY>" / "?api_key=<KEY>".'
     });
   }
 
