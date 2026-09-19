@@ -29,9 +29,15 @@ function convertWavToMp3(wavPath, outputPath = null) {
       targetMp3
     ];
 
-    execFile(ffmpegPath, args, (err) => {
+    const options = {
+      windowsHide: true,
+      stdio: ['ignore', 'ignore', 'pipe']
+    };
+
+    execFile(ffmpegPath, args, options, (err, stdout, stderr) => {
       if (err) {
-        return reject(new Error(`Gagal konversi WAV ke MP3: ${err.message}`));
+        const errMsg = stderr ? stderr.toString() : err.message;
+        return reject(new Error(`Gagal konversi WAV ke MP3: ${errMsg || err.message}`));
       }
 
       if (!fs.existsSync(targetMp3)) {
