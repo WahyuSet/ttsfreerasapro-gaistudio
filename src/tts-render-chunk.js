@@ -8,6 +8,7 @@ const {
   captureAudioElementsSnapshot,
   extractBaselineBlobUrls
 } = require('./audio-downloader');
+const { convertWavToMp3 } = require('./audio-converter');
 
 /**
  * Menjalankan render dan mengunduh berkas audio untuk satu bagian (chunk) naskah.
@@ -237,19 +238,38 @@ async function renderChunkAudio(page, chunk, options) {
   const downloadedPath = downloadResult.path;
 
   if (downloadedPath && fs.existsSync(downloadedPath)) {
-    const stats = fs.statSync(downloadedPath);
-    console.log(`[TtsEngine] File tersimpan: ${filename} (${(stats.size / 1024).toFixed(1)} KB) [${downloadResult.strategy}]`);
+    const wavStats = fs.statSync(downloadedPath);
+    console.log(`[TtsEngine] Berkas WAV diterima: ${filename} (${(wavStats.size / 1024).toFixed(1)} KB) [${downloadResult.strategy}]`);
+
+    // Konversi otomatis ke format MP3 (192 kbps)
+    let finalPath = downloadedPath;
+    let finalFilename = filename;
+    let finalStats = wavStats;
+
+    try {
+      console.log(`[TtsEngine] Mengonversi ${filename} ke format MP3 (192 kbps)...`);
+      const mp3Path = await convertWavToMp3(downloadedPath);
+      finalPath = mp3Path;
+      finalFilename = path.basename(mp3Path);
+      finalStats = fs.statSync(mp3Path);
+      console.log(`[TtsEngine] Berkas MP3 siap: ${finalFilename} (${(finalStats.size / 1024).toFixed(1)} KB)`);
+    } catch (convErr) {
+      console.warn(`[TtsEngine] Konversi MP3 gagal, menggunakan fallback WAV: ${convErr.message}`);
+    }
+
     return {
       partIndex: chunk.index,
       totalParts: chunk.total,
-      filename,
-      filePath: downloadedPath,
-      downloadUrl: `/api/tts/download/${filename}`,
-      sizeBytes: stats.size,
-      sizeKb: (stats.size / 1024).toFixed(1),
+      filename: finalFilename,
+      filePath: finalPath,
+      downloadUrl: `/api/tts/download/${finalFilename}`,
+      sizeBytes: finalStats.size,
+      sizeKb: (finalStats.size / 1024).toFixed(1),
       strategy: downloadResult.strategy,
       textSnippet: chunk.text.slice(0, 80) + (chunk.text.length > 80 ? '...' : ''),
-      wordCount: chunk.wordCount
+      wordCount: chunk.wordCount,
+      wavFilePath: downloadedPath,
+      wavFilename: filename
     };
   }
 

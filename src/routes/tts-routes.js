@@ -163,13 +163,16 @@ function createTtsRouter({ jobManager, ttsEngine, getBaseUrl }) {
       return res.status(404).json({ success: false, error: 'File audio tidak ditemukan di server.' });
     }
 
+    const isMp3 = (fileObj.filename || filePath).toLowerCase().endsWith('.mp3');
+    const contentType = isMp3 ? 'audio/mpeg' : 'audio/wav';
+
     if (req.query.download === 'true' || req.query.download === '1') {
       return res.download(filePath, fileObj.filename);
     }
 
     res.sendFile(filePath, {
       headers: {
-        'Content-Type': 'audio/wav',
+        'Content-Type': contentType,
         'Accept-Ranges': 'bytes'
       }
     });
@@ -182,16 +185,21 @@ function createTtsRouter({ jobManager, ttsEngine, getBaseUrl }) {
 
     // 1. Cek langsung nama file
     if (!fs.existsSync(filePath)) {
-      // Coba jika nama file tanpa ekstensi .wav
-      if (!path.extname(filename) && fs.existsSync(`${filePath}.wav`)) {
-        filePath = `${filePath}.wav`;
-        filename = `${filename}.wav`;
+      // Coba jika nama file tanpa ekstensi, prioritaskan .mp3 lalu .wav
+      if (!path.extname(filename)) {
+        if (fs.existsSync(`${filePath}.mp3`)) {
+          filePath = `${filePath}.mp3`;
+          filename = `${filename}.mp3`;
+        } else if (fs.existsSync(`${filePath}.wav`)) {
+          filePath = `${filePath}.wav`;
+          filename = `${filename}.wav`;
+        }
       }
     }
 
     // 2. Jika belum ditemukan, periksa apakah parameter adalah jobId
     if (!fs.existsSync(filePath)) {
-      const cleanId = filename.replace(/\.wav$/i, '');
+      const cleanId = filename.replace(/\.(mp3|wav)$/i, '');
       const job = jobManager.jobs.get(cleanId) || jobManager.jobs.get(filename);
       if (job && job.result && Array.isArray(job.result.files) && job.result.files.length > 0) {
         const fileObj = job.result.files[0];
@@ -199,6 +207,13 @@ function createTtsRouter({ jobManager, ttsEngine, getBaseUrl }) {
         if (fs.existsSync(possiblePath)) {
           filePath = possiblePath;
           filename = fileObj.filename;
+        } else {
+          // Coba cari berkas dengan nama yang sama berektensi .mp3 jika ada
+          const altMp3 = path.join(ttsEngine.downloadsDir, `${path.parse(fileObj.filename).name}.mp3`);
+          if (fs.existsSync(altMp3)) {
+            filePath = altMp3;
+            filename = path.basename(altMp3);
+          }
         }
       }
     }
@@ -208,13 +223,16 @@ function createTtsRouter({ jobManager, ttsEngine, getBaseUrl }) {
       return res.status(404).json({ success: false, error: 'File audio tidak ditemukan.' });
     }
 
+    const isMp3 = filename.toLowerCase().endsWith('.mp3');
+    const contentType = isMp3 ? 'audio/mpeg' : 'audio/wav';
+
     if (req.query.download === 'true' || req.query.download === '1') {
       return res.download(filePath, filename);
     }
 
     res.sendFile(filePath, {
       headers: {
-        'Content-Type': 'audio/wav',
+        'Content-Type': contentType,
         'Accept-Ranges': 'bytes'
       }
     });
