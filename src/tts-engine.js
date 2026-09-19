@@ -1,17 +1,124 @@
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 const { launchStealthChrome } = require('./stealth-browser');
 const { humanClick, humanPaste, humanDelay } = require('./human-behavior');
 const {
-  downloadFile,
   downloadWithRetry,
-  sanitizeFilename,
-  captureGeneratedAudio,
   captureAudioElementsSnapshot,
-  findTargetAudioElement,
-  extractBlobDirectly
+  extractBaselineBlobUrls
 } = require('./audio-downloader');
+
+/**
+ * Normalizes pill text for comparisons (removes non-alphanumeric, lowercases).
+ * @param {string} val
+ * @returns {string}
+ */
+function normalizePillValue(val) {
+  if (!val || typeof val !== 'string') return '';
+  return val.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Pure helper to verify if an element's text or aria-label matches the target pill value.
+ * @param {string} actualText
+ * @param {string} targetVal
+ * @returns {boolean}
+ */
+function isPillValueMatching(actualText, targetVal) {
+  if (!actualText || !targetVal) return false;
+  const normActual = normalizePillValue(actualText);
+  const normTarget = normalizePillValue(targetVal);
+  return normActual.includes(normTarget);
+}
+
+/**
+ * Selects a voice setting dropdown pill (Style, Pace, Accent) with robust Angular CDK overlay handling,
+ * idempotency checks, visible container scoping, and strict postcondition verification.
+ *
+ * @param {import('playwright').Page} page
+ * @param {'Style'|'Pace'|'Accent'} pillName
+ * @param {string} targetVal
+ */
+async function selectVoicePill(page, pillName, targetVal) {
+  if (!targetVal) return;
+  console.log(`[TtsEngine] 🎛️ Memilih ${pillName}: "${targetVal}"...`);
+
+  // 1. Tunggu overlay/backdrop sebelumnya benar-benar selesai menutup/detach
+  await page.waitForSelector('.cdk-overlay-backdrop', { state: 'detached', timeout: 3500 }).catch(() => {});
+  await humanDelay(250, 450);
+
+  // 2. Temukan tombol pill berdasarkan aria-label atau text
+  const pillBtn = page.locator(`button[aria-label="${pillName}" i], button[aria-label*="${pillName}" i], button:has-text("${pillName}")`).first();
+  if (!(await pillBtn.isVisible({ timeout: 3500 }).catch(() => false))) {
+    console.warn(`[TtsEngine] ⚠️ Tombol pill ${pillName} tidak ditemukan.`);
+    return;
+  }
+
+  // 3. Cek Idempotency: Jika nilai saat ini sudah sama dengan targetVal, lewati klik
+  const currentText = await pillBtn.innerText().catch(() => '');
+  const currentAria = await pillBtn.getAttribute('aria-label').catch(() => '');
+  if (isPillValueMatching(currentText, targetVal) || (isPillValueMatching(currentAria, targetVal) && !currentAria.toLowerCase().endsWith(pillName.toLowerCase()))) {
+    console.log(`[TtsEngine] ✓ ${pillName} sudah bernilai "${targetVal}" (idempotent, lewati pemilihan).`);
+    return;
+  }
+
+  // 4. Buka menu dropdown pill
+  await pillBtn.scrollIntoViewIfNeeded().catch(() => {});
+  await pillBtn.click().catch(async () => {
+    await pillBtn.click({ force: true });
+  });
+
+  // 5. Tunggu container overlay CDK muncul dan terlihat
+  await page.waitForSelector('.cdk-overlay-container .cdk-overlay-pane', { state: 'visible', timeout: 4000 }).catch(() => {});
+  await humanDelay(350, 550);
+
+  // 6. Pilih opsi target dari overlay aktif yang paling baru (teratas di DOM)
+  const overlayPanes = page.locator('.cdk-overlay-container .cdk-overlay-pane');
+  const activePane = overlayPanes.last();
+
+  // Pola pencarian bertahap:
+  // a. Exact match (e.g. ^Neutral$, ^Natural$)
+  const exactRegex = new RegExp(`^\\s*${targetVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+  // b. Word boundary match
+  const wordRegex = new RegExp(`\\b${targetVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+
+  let optionBtn = activePane.locator('[role="menuitem"], .mat-mdc-menu-item, button').filter({ hasText: exactRegex }).first();
+  if (!(await optionBtn.isVisible({ timeout: 1500 }).catch(() => false))) {
+    optionBtn = activePane.locator('.preset-label, .preset-description, span').filter({ hasText: exactRegex }).first();
+  }
+  if (!(await optionBtn.isVisible({ timeout: 1500 }).catch(() => false))) {
+    optionBtn = activePane.locator('[role="menuitem"], .mat-mdc-menu-item, button').filter({ hasText: wordRegex }).first();
+  }
+  if (!(await optionBtn.isVisible({ timeout: 1500 }).catch(() => false))) {
+    // Fallback pencarian jika overlay scoping tidak menangkap
+    optionBtn = page.locator(`.cdk-overlay-container [role="menuitem"]:has-text("${targetVal}"), .cdk-overlay-container button:has-text("${targetVal}")`).last();
+  }
+
+  if (await optionBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await optionBtn.scrollIntoViewIfNeeded().catch(() => {});
+    await optionBtn.click();
+    console.log(`[TtsEngine] Klik opsi "${targetVal}" pada menu ${pillName}.`);
+  } else {
+    await page.keyboard.press('Escape').catch(() => {});
+    throw new Error(`Opsi "${targetVal}" tidak ditemukan dalam menu dropdown ${pillName}.`);
+  }
+
+  // 7. Tunggu backdrop menutup sepenuhnya
+  await page.waitForSelector('.cdk-overlay-backdrop', { state: 'detached', timeout: 4000 }).catch(() => {});
+  await humanDelay(350, 650);
+
+  // 8. Postcondition Verification: Pastikan tombol pill sekarang mencerminkan targetVal
+  const verifiedText = await pillBtn.innerText().catch(() => '');
+  const verifiedAria = await pillBtn.getAttribute('aria-label').catch(() => '');
+  const isVerified = isPillValueMatching(verifiedText, targetVal) || isPillValueMatching(verifiedAria, targetVal);
+
+  if (!isVerified) {
+    console.warn(`[TtsEngine] ⚠️ Postcondition verification gagal untuk ${pillName}: teks aktual="${verifiedText}", aria="${verifiedAria}".`);
+    throw new Error(`Gagal memverifikasi konfigurasi ${pillName} ke "${targetVal}". Nilai aktual: "${verifiedText}" (aria: "${verifiedAria}").`);
+  }
+
+  console.log(`[TtsEngine] ✓ Konfigurasi ${pillName} terverifikasi: "${targetVal}".`);
+}
 
 /**
  * Ensures prompt begins with "Speaker 1 : " or user-defined speaker prefix.
@@ -127,7 +234,9 @@ async function dismissPopups(page) {
         await humanDelay(500, 800);
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    console.warn('[TtsEngine] Non-critical dismissPopups warning:', e.message);
+  }
 }
 
 class TtsEngine {
@@ -135,7 +244,6 @@ class TtsEngine {
     this.downloadsDir = options.downloadsDir || path.resolve(__dirname, '..', 'downloads');
     this.profilesDir = options.profilesDir || path.resolve(__dirname, '..', 'profiles', 'default');
     this.isBusy = false;
-    this.queue = [];
 
     if (!fs.existsSync(this.downloadsDir)) {
       fs.mkdirSync(this.downloadsDir, { recursive: true });
@@ -148,42 +256,22 @@ class TtsEngine {
   getStatus() {
     return {
       isBusy: this.isBusy,
-      queueLength: this.queue.length,
       downloadsDirectory: this.downloadsDir
     };
   }
 
   /**
-   * Enqueue a generation job to prevent concurrent browser conflicts
+   * Execution entry point for JobManager or direct invocation
    */
-  generate(params, onProgress = () => {}) {
-    return new Promise((resolve, reject) => {
-      this.queue.push({ params, onProgress, resolve, reject });
-      this._processQueue();
-    });
-  }
-
-  /**
-   * Direct execution for external queue managers (like JobManager)
-   */
-  execute(params, onProgress = () => {}) {
-    return this._executeJob(params, onProgress);
-  }
-
-  async _processQueue() {
-    if (this.isBusy || this.queue.length === 0) return;
+  async execute(params, onProgress = () => {}) {
+    if (this.isBusy) {
+      throw new Error('TtsEngine sedang sibuk memproses pekerjaan lain.');
+    }
     this.isBusy = true;
-    const job = this.queue.shift();
-
     try {
-      const result = await this._executeJob(job.params, job.onProgress);
-      job.resolve(result);
-    } catch (err) {
-      console.error('[TtsEngine] Generation error:', err);
-      job.reject(err);
+      return await this._executeJob(params, onProgress);
     } finally {
       this.isBusy = false;
-      this._processQueue();
     }
   }
 
@@ -271,7 +359,7 @@ class TtsEngine {
       });
       await dismissPopups(page);
       console.log('[TtsEngine] Memilih template "The Patient Teacher"...');
-      const templateSelector = 'mat-card[aria-label*="The Patient Teacher"], mat-card:has-text("The Patient Teacher")';
+      const templateSelector = 'mat-card[aria-label="The Patient Teacher - A patient and encouraging language teacher."], mat-card[aria-label*="The Patient Teacher"], mat-card:has-text("The Patient Teacher")';
       await humanClick(page, templateSelector).catch(() => {});
       await humanDelay(1000, 1600);
 
@@ -285,7 +373,7 @@ class TtsEngine {
       });
       await dismissPopups(page);
       console.log('[TtsEngine] Beralih ke Text Mode...');
-      const textTab = page.locator('button:has-text("Text"), [aria-label*="Text"]').first();
+      const textTab = page.locator('button:has-text("edit_noteText"), button:has-text("Text"), [aria-label*="Text" i]').first();
       await textTab.click({ force: true }).catch(() => {});
       await humanDelay(800, 1400);
 
@@ -305,79 +393,50 @@ class TtsEngine {
         message: `Mengatur karakter suara (${voice}, ${style}, ${pace}, ${accent})...`
       });
       console.log('[TtsEngine] Mengatur karakter suara...');
-      const voiceTrigger = page.locator('button:has-text("Achernar"), button:has-text("Speaker 1"), .speaker-voice-trigger, [aria-label*="Voice" i]').first();
+      const voiceTrigger = page.locator('button[aria-label="Open voice settings"], button:has-text("Achernar"), button:has-text("Speaker 1"), .speaker-voice-trigger, [aria-label*="voice settings" i], [aria-label*="Voice" i]').first();
       if (await voiceTrigger.isVisible({ timeout: 4000 }).catch(() => false)) {
         await voiceTrigger.click({ force: true });
         await humanDelay(800, 1200);
 
-        // Sub-helper pilih pill
-        const choosePill = async (pillName, targetVal) => {
-          if (!targetVal) return;
-          try {
-            console.log(`[TtsEngine] 🎛️ Memilih ${pillName}: "${targetVal}"...`);
-            const searchKeywords = [
-              targetVal,
-              targetVal.replace(/\s+/g, '-'),
-              targetVal.toLowerCase(),
-              targetVal.split(' ')[0]
-            ];
-
-            const pillBtn = page.locator(`button[aria-label*="${pillName}" i], button:has-text("${pillName}"), mat-chip:has-text("${pillName}"), .mat-mdc-chip:has-text("${pillName}")`).first();
-            await pillBtn.scrollIntoViewIfNeeded().catch(() => {});
-            await pillBtn.click({ force: true });
+        // Isi Persona jika tersedia
+        if (persona) {
+          console.log(`[TtsEngine] 📝 Mengisi voice persona...`);
+          const personaSelector = 'textarea[placeholder*="Describe the voice persona" i], textarea[placeholder*="voice persona" i]';
+          const personaField = page.locator(personaSelector).first();
+          if (await personaField.isVisible({ timeout: 2500 }).catch(() => false)) {
+            await humanPaste(page, personaSelector, persona);
             await humanDelay(400, 700);
-
-            // Cari opsi di dalam overlay container
-            let matchedOption = null;
-            for (const kw of searchKeywords) {
-              const opt = page.locator(`.cdk-overlay-container [role="menuitem"], .cdk-overlay-container .mat-mdc-menu-item, .cdk-overlay-container button, .cdk-overlay-container [role="option"]`)
-                .filter({ hasText: new RegExp(kw, 'i') }).first();
-              if (await opt.isVisible({ timeout: 3000 }).catch(() => false)) {
-                matchedOption = opt;
-                break;
-              }
-            }
-
-            // Fallback selector jika tidak tertangkap filter di atas
-            if (!matchedOption) {
-              matchedOption = page.locator(`.cdk-overlay-container [role="menuitem"]:has-text("${targetVal}" i), .cdk-overlay-container button:has-text("${targetVal}" i)`).first();
-            }
-
-            if (await matchedOption.isVisible({ timeout: 3000 }).catch(() => false)) {
-              await matchedOption.click({ force: true });
-              console.log(`[TtsEngine] ✓ Berhasil memilih "${targetVal}" pada ${pillName}.`);
-            } else {
-              console.warn(`[TtsEngine] ⚠️ Opsi "${targetVal}" tidak ditemukan dalam menu ${pillName}.`);
-              await page.keyboard.press('Escape').catch(() => {});
-            }
-
-            await page.waitForSelector('.cdk-overlay-backdrop', { state: 'detached', timeout: 4000 }).catch(() => {});
-            await humanDelay(300, 600);
-          } catch (err) {
-            console.warn(`[TtsEngine] Kendala saat mengatur pill ${pillName}:`, err.message);
-            await page.keyboard.press('Escape').catch(() => {});
           }
-        };
+        }
 
-        if (style) await choosePill('Style', style);
-        if (pace) await choosePill('Pace', pace);
-        if (accent) await choosePill('Accent', accent);
+        // Atur Voice Settings Pill (Style, Pace, Accent) dengan verifikasi postcondition
+        if (style) await selectVoicePill(page, 'Style', style);
+        if (pace) await selectVoicePill(page, 'Pace', pace);
+        if (accent) await selectVoicePill(page, 'Accent', accent);
 
-        // Pilih Voice
+        // Pilih Voice (prioritaskan pencarian lewat input Search voices)
         if (voice) {
           console.log(`[TtsEngine] 👤 Memilih karakter suara: ${voice}...`);
-          const voiceCard = page.locator(`button[aria-label*="${voice}" i], button:has-text("${voice}"), div.voice-card:has-text("${voice}")`).first();
+          const searchInput = page.locator('input[aria-label="Search voices"], input[placeholder*="Search voices" i]').first();
+          if (await searchInput.isVisible({ timeout: 2500 }).catch(() => false)) {
+            await humanPaste(page, 'input[aria-label="Search voices"]', voice.toLowerCase());
+            await humanDelay(400, 700);
+          }
+
+          const voiceCard = page.locator(`button[aria-label="${voice}" i], button[aria-label*="${voice}" i], button:has-text("${voice}"), div.voice-card:has-text("${voice}")`).first();
           if (await voiceCard.isVisible({ timeout: 3000 }).catch(() => false)) {
             await voiceCard.scrollIntoViewIfNeeded().catch(() => {});
             await voiceCard.click({ force: true });
             await humanDelay(500, 800);
             console.log(`[TtsEngine] ✓ Suara ${voice} dipilih.`);
+          } else {
+            console.warn(`[TtsEngine] ⚠️ Suara ${voice} tidak ditemukan.`);
           }
         }
 
         // Tutup panel
-        const closeBtn = page.locator('button[aria-label="Close panel"], button:has(span:has-text("close"))').first();
-        if (await closeBtn.isVisible().catch(() => false)) {
+        const closeBtn = page.locator('button[aria-label="Close panel"], button[aria-label="Close"], button:has(span:has-text("close"))').first();
+        if (await closeBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
           await closeBtn.click();
         } else {
           await page.keyboard.press('Escape').catch(() => {});
@@ -401,9 +460,13 @@ class TtsEngine {
         });
         console.log(`\n[TtsEngine] 🎬 Memproses Bagian [${chunk.index}/${chunk.total}] (${chunk.wordCount} kata)...`);
         
-        // 1. Snapshot baseline audio elements sebelum RUN untuk isolasi chunk
+        // 1. Snapshot baseline audio elements dan download buttons sebelum RUN untuk isolasi chunk
         const baselineAudioSnapshot = await captureAudioElementsSnapshot(page);
-        console.log(`[TtsEngine] Audio baseline snapshot: ${baselineAudioSnapshot.length} elements detected.`);
+        const baselineBlobUrls = extractBaselineBlobUrls(baselineAudioSnapshot);
+        const baselineDlCount = await page.evaluate(() => {
+          return document.querySelectorAll('button[aria-label="Download"], button[aria-label*="Download" i], button:has-text("Download")').length;
+        }).catch(() => 0);
+        console.log(`[TtsEngine] Audio baseline snapshot: ${baselineAudioSnapshot.length} elements, ${baselineBlobUrls.size} blob URLs detected.`);
 
         // 2. Paste prompt naskah
         const promptTextarea = 'textarea[aria-label="Enter a prompt"]';
@@ -412,10 +475,19 @@ class TtsEngine {
         await humanDelay(1500, 2200);
 
         // Siapkan listener respons jaringan backend Google AI Studio untuk monitoring
+        let apiDone = false;
+        let apiTimestamp = 0;
         const apiResponsePromise = page.waitForResponse(res => {
           const u = res.url();
           return (u.includes('alkalimakersuite') || u.includes('generate-speech') || u.includes('predict')) && res.status() === 200;
-        }, { timeout: 120000 }).catch(() => null);
+        }, { timeout: 180000 }).catch(() => null);
+        apiResponsePromise.then(res => {
+          if (res) {
+            console.log(`[TtsEngine] 🌐 Backend API TTS respons diterima (${res.status()}).`);
+            apiDone = true;
+            apiTimestamp = Date.now();
+          }
+        });
 
         // 3. Klik RUN
         onProgress({
@@ -427,23 +499,28 @@ class TtsEngine {
         });
         await dismissPopups(page);
         console.log(`[TtsEngine] ⚡ Klik RUN (Bagian ${chunk.index})...`);
-        const runBtn = 'button:has-text("Run"), button.run-button, [aria-label*="Run" i]';
+        const runBtn = 'button:has-text("Run  Ctrl  keyboard_return"), button:has-text("Run"), button.run-button, [aria-label*="Run" i]';
         await humanClick(page, runBtn);
 
-        // 4. Tunggu audio selesai dirender berdasarkan siklus tombol Run (Run -> Spinner -> Run kembali) & Kesiapan Tombol Download
-        console.log('[TtsEngine] ⏳ Menunggu Gemini merender audio (memantau spinner & tombol Run/Download)...');
+        // 4. Tunggu audio selesai dirender berdasarkan bukti nyata (audio blob baru)
+        console.log('[TtsEngine] ⏳ Menunggu Gemini merender audio (memantau status generasi & blob audio baru)...');
         const genStartTime = Date.now();
         let lastReportSec = 0;
         let detectedTargetAudio = null;
 
-        // Beri jeda awal agar render mulai berjalan dan spinner muncul
+        // Beri jeda awal agar render mulai berjalan
         await humanDelay(1500, 2500);
 
         while (true) {
           const elapsedSec = Math.floor((Date.now() - genStartTime) / 1000);
 
-          // Cek status lengkap UI dengan membandingkan terhadap baselineAudioSnapshot
-          const uiState = await page.evaluate((baseline) => {
+          if (page.isClosed()) {
+            throw new Error(`Target page, context or browser has been closed during rendering of chunk ${chunk.index}`);
+          }
+
+          // Cek status lengkap UI dengan membandingkan terhadap baseline snapshot
+          const baselineUrlsArray = Array.from(baselineBlobUrls);
+          const uiState = await page.evaluate(({ baselineUrls, baselineDlCount }) => {
             // 1. Cek apakah ada spinner aktif
             const spinners = document.querySelectorAll('mat-progress-spinner, mat-spinner, .mat-mdc-progress-spinner, [role="progressbar"], .spinner');
             const hasSpinner = Array.from(spinners).some(s => {
@@ -451,34 +528,32 @@ class TtsEngine {
               return rect.width > 0 && rect.height > 0;
             });
 
-            // 2. Cek apakah ada tombol Stop yang aktif
-            const stopButtons = Array.from(document.querySelectorAll('button')).filter(b => {
-              const t = ((b.innerText || '') + ' ' + (b.getAttribute('aria-label') || '')).toLowerCase();
-              return t.includes('stop');
-            });
-            const hasStop = stopButtons.some(b => b.getBoundingClientRect().width > 0);
-
-            // 3. Cek apakah tombol RUN sudah kembali aktif normal
+            // 2. Cek status tombol Run/Stop generasi utama (BUKAN tombol kontrol audio player playback!)
             const runButtons = Array.from(document.querySelectorAll('button')).filter(b => {
               const t = ((b.innerText || '') + ' ' + (b.getAttribute('aria-label') || '')).toLowerCase();
-              return t.includes('run') || t.includes('ctrl');
-            });
-            const isRunReady = runButtons.some(b => {
-              const notDisabled = !b.disabled && !b.hasAttribute('disabled') && b.getAttribute('aria-disabled') !== 'true';
-              return b.getBoundingClientRect().width > 0 && notDisabled;
+              return (t.includes('run') && (t.includes('ctrl') || b.classList.contains('mat-mdc-unelevated-button') || b.classList.contains('mat-primary'))) ||
+                     t.includes('stop generation') ||
+                     b.classList.contains('run-button');
             });
 
-            // 4. Cek tombol Download
-            const dlButtons = Array.from(document.querySelectorAll('button')).filter(b => {
+            let isGenBusy = false;
+            let isRunReady = false;
+            if (runButtons.length > 0) {
+              const b = runButtons[0];
               const t = ((b.innerText || '') + ' ' + (b.getAttribute('aria-label') || '')).toLowerCase();
-              return t.includes('download');
-            });
-            const isDownloadBtnReady = dlButtons.some(b => {
+              const notDisabled = !b.disabled && !b.hasAttribute('disabled') && b.getAttribute('aria-disabled') !== 'true';
+              isGenBusy = t.includes('stop') && !t.includes('play');
+              isRunReady = (t.includes('run') || t.includes('ctrl')) && notDisabled;
+            }
+
+            // 3. Cek tombol Download yang terpasang
+            const dlButtons = Array.from(document.querySelectorAll('button[aria-label="Download"], button[aria-label*="Download" i], button:has-text("Download")')).filter(b => {
               const notDisabled = !b.disabled && !b.hasAttribute('disabled') && b.getAttribute('aria-disabled') !== 'true';
               return b.getBoundingClientRect().width > 0 && notDisabled;
             });
+            const hasNewDownloadButton = dlButtons.length > baselineDlCount;
 
-            // 5. Cek elemen audio dan bandingkan dengan baseline snapshot
+            // 4. Cek elemen audio dan bandingkan blob URL terhadap baseline
             const audios = Array.from(document.querySelectorAll('audio')).map((a, idx) => ({
               index: idx,
               src: a.src || null,
@@ -487,30 +562,22 @@ class TtsEngine {
               duration: a.duration
             }));
 
-            let targetAudio = null;
-            // Cari elemen audio yang src-nya baru (berbeda dari baseline snapshot)
-            for (const a of audios) {
+            let freshAudio = null;
+            for (let i = audios.length - 1; i >= 0; i--) {
+              const a = audios[i];
               const s = a.currentSrc || a.src || '';
-              if (!s.startsWith('blob:') || a.readyState < 1) continue;
-
-              const baseMatch = (baseline || []).find(b => b.index === a.index);
-              if (!baseMatch) {
-                targetAudio = a;
-                break;
-              }
-              const baseSrc = baseMatch.currentSrc || baseMatch.src || '';
-              if (s !== baseSrc) {
-                targetAudio = a;
+              if (s.startsWith('blob:') && !baselineUrls.includes(s) && a.readyState >= 1) {
+                freshAudio = a;
                 break;
               }
             }
 
-            // Fallback: Jika baseline kosong atau audio player siap
-            if (!targetAudio) {
-              targetAudio = audios.filter(a => (a.currentSrc || a.src || '').startsWith('blob:') && a.readyState >= 1).pop() || null;
+            // Fallback jika baseline benar-benar kosong sejak awal
+            if (!freshAudio && (!baselineUrls || baselineUrls.length === 0)) {
+              freshAudio = audios.filter(a => (a.currentSrc || a.src || '').startsWith('blob:') && a.readyState >= 1).pop() || null;
             }
 
-            // 6. Cek pesan error banner
+            // 5. Cek pesan error banner
             let errorMessage = null;
             const errorNodes = document.querySelectorAll('mat-snack-bar-container, .error-message, [role="alert"], ms-banner');
             for (const el of errorNodes) {
@@ -523,28 +590,31 @@ class TtsEngine {
 
             return {
               hasSpinner,
-              hasStop,
+              isGenBusy,
               isRunReady,
-              isDownloadBtnReady,
-              targetAudio,
-              isNewAudioReady: Boolean(targetAudio),
+              hasNewDownloadButton,
+              audioCount: audios.length,
+              freshAudio,
+              isFreshAudioReady: Boolean(freshAudio),
               errorMessage
             };
-          }, baselineAudioSnapshot).catch(() => ({
+          }, { baselineUrls: baselineUrlsArray, baselineDlCount }).catch(() => ({
             hasSpinner: true,
-            hasStop: false,
+            isGenBusy: false,
             isRunReady: false,
-            isDownloadBtnReady: false,
-            targetAudio: null,
-            isNewAudioReady: false,
+            hasNewDownloadButton: false,
+            audioCount: 0,
+            freshAudio: null,
+            isFreshAudioReady: false,
             errorMessage: null
           }));
 
-          // KONDISI 1 (SUKSES): Jika audio sudah siap di player, atau tombol Download siap, atau spinner selesai dan tombol Run kembali aktif
-          const isProcessingFinished = (uiState.isNewAudioReady || uiState.isDownloadBtnReady || (uiState.isRunReady && !uiState.hasSpinner)) && !uiState.hasStop && elapsedSec >= 3;
+          // KONDISI 1 (SUKSES): Audio baru benar-benar sudah siap di player (blob baru terdeteksi),
+          // dan tidak sedang ada spinner maupun generasi yang sibuk
+          const isProcessingFinished = uiState.isFreshAudioReady && !uiState.hasSpinner && !uiState.isGenBusy && elapsedSec >= 3;
 
           if (isProcessingFinished) {
-            detectedTargetAudio = uiState.targetAudio;
+            detectedTargetAudio = uiState.freshAudio;
             console.log(`[TtsEngine] ✓ Proses render audio selesai! (Durasi ${elapsedSec}s)`);
             if (detectedTargetAudio) {
               console.log(`[TtsEngine] [TTS] Audio Blob baru terdeteksi: ${detectedTargetAudio.currentSrc || detectedTargetAudio.src} | Durasi: ${detectedTargetAudio.duration || 0}s`);
@@ -552,14 +622,33 @@ class TtsEngine {
             break;
           }
 
-          // KONDISI 2 (ERROR FATAL): Hanya lempar error jika TIDAK ADA audio yang berhasil terbuat setelah spinner berhenti
-          if (uiState.errorMessage && !uiState.hasSpinner && !uiState.isNewAudioReady && elapsedSec >= 6) {
+          // KONDISI 2: API respons selesai (200 OK) + tombol / audio output baru terpasang
+          if (apiDone && !uiState.hasSpinner && !uiState.isGenBusy) {
+            if (uiState.isFreshAudioReady) {
+              detectedTargetAudio = uiState.freshAudio;
+              console.log(`[TtsEngine] ✓ Proses render audio selesai (API 200 + Fresh Blob)! (Durasi ${elapsedSec}s)`);
+              break;
+            }
+            if (uiState.hasNewDownloadButton) {
+              console.log(`[TtsEngine] ✓ Proses render audio selesai (API 200 + Tombol Download Baru)! (Durasi ${elapsedSec}s)`);
+              break;
+            }
+            const apiSettleSec = Math.floor((Date.now() - apiTimestamp) / 1000);
+            if (apiSettleSec >= 6 && uiState.freshAudio) {
+              detectedTargetAudio = uiState.freshAudio;
+              console.log(`[TtsEngine] ✓ Proses render selesai pasca-API settle (${apiSettleSec}s).`);
+              break;
+            }
+          }
+
+          // KONDISI 3 (ERROR FATAL): Hanya lempar error jika TIDAK ADA audio yang berhasil terbuat setelah spinner berhenti
+          if (uiState.errorMessage && !uiState.hasSpinner && !uiState.isFreshAudioReady && elapsedSec >= 6) {
             throw new Error(`[Google AI Studio Rejection]: "${uiState.errorMessage}". Silakan periksa format naskah atau kuota harian akun Google.`);
           }
 
-          if (elapsedSec - lastReportSec >= 5) {
+          if (elapsedSec - lastReportSec >= 4) {
             lastReportSec = elapsedSec;
-            console.log(`   ⏳ Masih memproses audio (${elapsedSec}s berjalan)...`);
+            console.log(`   ⏳ (${elapsedSec}s) Spinner: ${uiState.hasSpinner} | GenBusy: ${uiState.isGenBusy} | RunReady: ${uiState.isRunReady} | FreshAudio: ${uiState.isFreshAudioReady} | NewDL: ${uiState.hasNewDownloadButton} | ApiDone: ${apiDone}`);
             onProgress({
               stage: 'rendering',
               progress: Math.min(Math.round(chunkBase + progressChunkSlice * 0.65), 92),
@@ -569,9 +658,8 @@ class TtsEngine {
             });
           }
 
-          if (elapsedSec > 900) {
-            console.warn('[TtsEngine] ⚠️ Batas waktu render 15 menit tercapai.');
-            break;
+          if (elapsedSec > 180) {
+            throw new Error(`[TtsEngine] ⚠️ Batas waktu render audio tercapai (${elapsedSec}s). Audio tidak berhasil digenerate oleh Gemini.`);
           }
 
           await new Promise(r => setTimeout(r, 800));
@@ -608,7 +696,7 @@ class TtsEngine {
           targetBlobSrc: detectedBlobSrc,
           trigger: async () => {
             if (page.isClosed()) return;
-            const downloadBtn = page.locator('button[aria-label*="Download" i], button:has-text("Download")').first();
+            const downloadBtn = page.locator('button[aria-label="Download"], button[aria-label*="Download" i], button:has-text("Download")').last();
             if (await downloadBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
               await downloadBtn.scrollIntoViewIfNeeded().catch(() => {});
               await downloadBtn.click({ force: true });
@@ -709,5 +797,9 @@ class TtsEngine {
 
 module.exports = {
   TtsEngine,
-  splitTextIntoChunks
+  splitTextIntoChunks,
+  formatSpeakerPrompt,
+  normalizePillValue,
+  isPillValueMatching,
+  selectVoicePill
 };

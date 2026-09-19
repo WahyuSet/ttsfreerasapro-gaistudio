@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { launchStealthChrome } = require('./stealth-browser');
 const { getInjectedRecorderScript } = require('./injected-recorder');
-const { generateStandaloneScript, generateApiTemplate } = require('./code-generator');
+const { generateStandaloneScript, generateApiTemplate, isLoginStep } = require('./code-generator');
 
 class RecorderEngine {
   constructor() {
@@ -164,20 +164,7 @@ class RecorderEngine {
   }
 
   isLoginStep(step) {
-    const url = step.url || '';
-    const selector = step.selector || '';
-
-    // Ignore navigation to Google login / OAuth / signin endpoints
-    if (/accounts\.google\.com|signin\/identifier|challenge\/pwd|challenge\/dp|ServiceLogin/i.test(url)) {
-      return true;
-    }
-
-    // Ignore inputs/clicks on login credentials
-    if (/#identifierId|input\[name="Passwd"\]|input\[name="password"\]|input\[type="password"\]/i.test(selector)) {
-      return true;
-    }
-
-    return false;
+    return isLoginStep(step);
   }
 
   addStep(step) {

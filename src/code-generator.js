@@ -25,7 +25,7 @@ function generateStandaloneScript(sessionName, steps = [], options = {}) {
     `const fs = require('fs');`,
     `const path = require('path');`,
     `const { launchStealthChrome } = require('../../src/stealth-browser');`,
-    `const { humanClick, humanType, humanPaste, humanDelay } = require('../../src/human-behavior');`,
+    `const { humanClick, humanPaste, humanDelay } = require('../../src/human-behavior');`,
     ``,
     `/**`,
     ` * Fungsi utama automasi yang dapat dipanggil dari Service API`,
@@ -209,6 +209,7 @@ module.exports = app;
 }
 
 module.exports = {
+  isLoginStep,
   generateStandaloneScript,
   generateApiTemplate
 };

@@ -68,18 +68,11 @@ Setelah sesi tersimpan, kapan saja Anda ingin merekam langkah baru, cukup **klik
 ---
 
 ### Langkah 3: Auto-Run Test Hasil Rekaman (Otomatis Generate & Download)
-Untuk menguji dan memastikan seluruh 26 langkah berjalan otomatis dari awal sampai akhir:
+Untuk menguji dan memastikan seluruh langkah berjalan otomatis dari awal sampai akhir via REST API:
 Cukup **klik 2x**:
-👉 **`TEST_RUN.bat`**
-- Google Chrome Windows akan terbuka secara visual (bisa Anda tonton langsung).
-- Playwright akan memutar ulang alur yang Anda rekam:
-  1. Membuka Google AI Studio TTS (langsung login).
-  2. Memilih template & mengatur voice persona.
-  3. Mengetik naskah suara.
-  4. Menekan tombol **Run**.
-  5. Menunggu Gemini TTS memproses audio (timeout 60s).
-  6. Otomatis mengunduh file suara `.wav` ke folder `downloads/`.
-- Di akhir proses, terminal akan menampilkan konfirmasi keberhasilan dan lokasi file audio baru yang dihasilkan!
+👉 **`TEST_TTS_API.bat`**
+- Menguji endpoint REST API TTS (`/api/tts/jobs`) secara live.
+- Memantau progres job hingga selesai dan memverifikasi file audio `.wav` terunduh di folder `downloads/`.
 
 ### 📦 Layanan REST API Gemini TTS (Arsitektur Asynchronous Jobs):
 Server REST API lokal yang menyediakan pembuatan suara sintetis Gemini 2.5 Pro TTS dengan **Teknik Jobs (Asynchronous Job Queue)**:

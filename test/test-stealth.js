@@ -39,8 +39,8 @@ async function runTests() {
   ];
   const generatedScript = generateStandaloneScript('test_session', sampleSteps);
   assert.ok(generatedScript.includes('page.goto("https://example.com"'), 'Script should include navigation');
-  assert.ok(generatedScript.includes('page.click("button#login"'), 'Script should include click');
-  assert.ok(generatedScript.includes('page.fill("input[name=\\"user\\"]", "admin"'), 'Script should include fill');
+  assert.ok(generatedScript.includes('humanClick(page, "button#login")'), 'Script should include click');
+  assert.ok(generatedScript.includes('humanPaste(page, "input[name=\\"user\\"]", "admin")'), 'Script should include fill');
   console.log('Code Generator generated valid Playwright code.');
 
   console.log('\n--- 4. Testing Real-Time Auto-Save in RecorderEngine ---');

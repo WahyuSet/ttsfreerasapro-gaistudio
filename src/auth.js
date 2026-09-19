@@ -71,6 +71,7 @@ function apiKeyAuth(req, res, next) {
 }
 
 module.exports = {
+  loadEnv,
   apiKeyAuth,
   DEFAULT_API_KEY
 };

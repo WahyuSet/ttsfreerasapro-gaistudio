@@ -7,30 +7,11 @@
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const { loadEnv, DEFAULT_API_KEY } = require('../src/auth');
 
-// Baca file .env manual untuk konfigurasi PORT dan API Key
-function loadEnv() {
-  const envPath = path.resolve(__dirname, '..', '.env');
-  const env = { PORT: 3001, AUSTUDIO_API_KEY: 'IkPzTzClQrVGj73OMWIm7TPkRTHnlj7M' };
-  if (fs.existsSync(envPath)) {
-    const lines = fs.readFileSync(envPath, 'utf8').split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const idx = trimmed.indexOf('=');
-      if (idx > 0) {
-        const key = trimmed.slice(0, idx).trim();
-        const val = trimmed.slice(idx + 1).trim();
-        env[key] = val;
-      }
-    }
-  }
-  return env;
-}
-
-const env = loadEnv();
-const PORT = process.env.PORT || env.PORT || 3001;
-const API_KEY = process.env.AUSTUDIO_API_KEY || env.AUSTUDIO_API_KEY || 'IkPzTzClQrVGj73OMWIm7TPkRTHnlj7M';
+loadEnv();
+const PORT = process.env.PORT || 3001;
+const API_KEY = process.env.AUSTUDIO_API_KEY || DEFAULT_API_KEY;
 const HOST = 'localhost';
 
 function httpRequest(options, postData = null) {

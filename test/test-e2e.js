@@ -79,7 +79,7 @@ async function testEndToEnd() {
 
   assert.strictEqual(savedSteps.length, currentSteps.length, 'Disk steps.json should match in-memory steps');
   assert.ok(savedScript.includes('data:text/html'), 'Script should include navigation');
-  assert.ok(savedScript.includes('page.click') || savedScript.includes('page.fill'), 'Script should include interactions');
+  assert.ok(savedScript.includes('humanClick') || savedScript.includes('humanPaste') || savedScript.includes('page.click') || savedScript.includes('page.fill'), 'Script should include interactions');
 
   console.log('4. Stopping recording session...');
   await engine.stopSession();

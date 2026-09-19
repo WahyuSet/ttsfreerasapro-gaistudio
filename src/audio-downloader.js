@@ -1,6 +1,5 @@
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 
 /**
  * Sanitize filename to ensure safe filesystem path on Windows and Unix.
@@ -17,8 +16,78 @@ function sanitizeFilename(filename) {
 }
 
 /**
+ * Extract all unique blob: URLs from a baseline snapshot.
+ * @param {Array} baselineSnapshot
+ * @returns {Set<string>}
+ */
+function extractBaselineBlobUrls(baselineSnapshot) {
+  const set = new Set();
+  if (!Array.isArray(baselineSnapshot)) return set;
+  for (const item of baselineSnapshot) {
+    const src = item?.currentSrc || item?.src;
+    if (typeof src === 'string' && src.startsWith('blob:')) {
+      set.add(src);
+    }
+  }
+  return set;
+}
+
+/**
+ * Check if a candidate audio source is a genuinely fresh blob URL not in baseline.
+ * @param {string|null} candidateSrc
+ * @param {Set<string>|Array<string>} baselineBlobUrls
+ * @returns {boolean}
+ */
+function isFreshBlob(candidateSrc, baselineBlobUrls) {
+  if (!candidateSrc || typeof candidateSrc !== 'string' || !candidateSrc.startsWith('blob:')) {
+    return false;
+  }
+  if (baselineBlobUrls instanceof Set) {
+    return !baselineBlobUrls.has(candidateSrc);
+  }
+  if (Array.isArray(baselineBlobUrls)) {
+    return !baselineBlobUrls.includes(candidateSrc);
+  }
+  return true;
+}
+
+/**
+ * Pure helper to detect a fresh audio element among current audios compared to baseline.
+ * Prioritizes newest audio elements with a blob URL not present in baseline.
+ * @param {Array} currentAudios
+ * @param {Array} baselineSnapshot
+ * @returns {Object|null}
+ */
+function findFreshBlobAudio(currentAudios, baselineSnapshot = []) {
+  if (!Array.isArray(currentAudios) || currentAudios.length === 0) return null;
+  const baselineUrls = extractBaselineBlobUrls(baselineSnapshot);
+
+  // 1. Cari dari elemen audio terbaru ke terlama yang memiliki URL blob baru (tidak ada di baseline)
+  for (let i = currentAudios.length - 1; i >= 0; i--) {
+    const cur = currentAudios[i];
+    const curSrc = cur?.currentSrc || cur?.src;
+    if (isFreshBlob(curSrc, baselineUrls)) {
+      return cur;
+    }
+  }
+
+  // 2. Fallback: HANYA jika baseline tidak memiliki URL blob sama sekali
+  if (baselineUrls.size === 0) {
+    for (let i = currentAudios.length - 1; i >= 0; i--) {
+      const cur = currentAudios[i];
+      const curSrc = cur?.currentSrc || cur?.src;
+      if (typeof curSrc === 'string' && curSrc.startsWith('blob:')) {
+        return cur;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Capture baseline snapshot of all <audio> elements in DOM before triggering a generation.
- * @param {import('playwright').Page} page 
+ * @param {import('playwright').Page} page
  * @returns {Promise<Array<{ index: number, src: string|null, currentSrc: string|null, readyState: number, networkState: number, duration: number, paused: boolean }>>}
  */
 async function captureAudioElementsSnapshot(page) {
@@ -44,7 +113,7 @@ async function captureAudioElementsSnapshot(page) {
 /**
  * Detect the target audio element & blob URL corresponding to the CURRENT generation chunk.
  * Compares current audio elements against baseline snapshot taken before RUN.
- * 
+ *
  * @param {import('playwright').Page} page
  * @param {Array} baselineSnapshot
  * @returns {Promise<{ index: number, src: string, currentSrc: string, readyState: number, duration: number }|null>}
@@ -52,7 +121,8 @@ async function captureAudioElementsSnapshot(page) {
 async function findTargetAudioElement(page, baselineSnapshot = []) {
   if (!page || page.isClosed()) return null;
   try {
-    return await page.evaluate((baseline) => {
+    const baselineUrlsArray = Array.from(extractBaselineBlobUrls(baselineSnapshot));
+    return await page.evaluate((baselineUrls) => {
       const currentAudios = Array.from(document.querySelectorAll('audio')).map((audio, index) => ({
         index,
         src: audio.src || null,
@@ -65,26 +135,20 @@ async function findTargetAudioElement(page, baselineSnapshot = []) {
 
       if (currentAudios.length === 0) return null;
 
-      // 1. Cari elemen audio baru yang belum ada di baseline snapshot
-      for (const cur of currentAudios) {
+      // 1. Cari dari elemen audio terbaru ke terlama yang memiliki URL blob baru
+      for (let i = currentAudios.length - 1; i >= 0; i--) {
+        const cur = currentAudios[i];
         const curSrc = cur.currentSrc || cur.src;
-        if (!curSrc || !curSrc.startsWith('blob:')) continue;
-
-        const matchingBaseline = baseline.find(b => b.index === cur.index);
-        if (!matchingBaseline) {
-          return cur;
-        }
-        const baseSrc = matchingBaseline.currentSrc || matchingBaseline.src;
-        if (curSrc !== baseSrc) {
+        if (curSrc && curSrc.startsWith('blob:') && !baselineUrls.includes(curSrc)) {
           return cur;
         }
       }
 
-      // 2. Fallback: HANYA jika baseline snapshot kosong (generasi pertama kali di tab baru)
-      if (!baseline || baseline.length === 0) {
+      // 2. Fallback: HANYA jika baseline snapshot kosong (tidak ada blob URL sama sekali)
+      if (!baselineUrls || baselineUrls.length === 0) {
         const blobAudios = currentAudios.filter(a => {
           const src = a.currentSrc || a.src;
-          return src && src.startsWith('blob:') && a.readyState >= 1;
+          return src && src.startsWith('blob:');
         });
 
         if (blobAudios.length > 0) {
@@ -93,7 +157,7 @@ async function findTargetAudioElement(page, baselineSnapshot = []) {
       }
 
       return null;
-    }, baselineSnapshot);
+    }, baselineUrlsArray);
   } catch (err) {
     console.warn('[DOWNLOAD] Peringatan saat mencari elemen audio:', err.message);
     return null;
@@ -317,13 +381,11 @@ async function downloadFile({
       console.log(`[DOWNLOAD] Strategy: PLAYWRIGHT_DOWNLOAD`);
       console.log(`[DOWNLOAD] Output: ${finalPath}`);
     } catch (downloadErr) {
-      console.warn(`[DOWNLOAD] Native download event gagal (${downloadErr.message}). Memeriksa fallback scan lokal...`);
-
-      const recoveredPath = await scanLocalOutputFallback(downloadDir, finalPath, startTime, 3000);
-      if (!recoveredPath) {
-        throw new Error(`Seluruh strategi download gagal. Blob URL tidak valid & download event error: ${downloadErr.message}`);
+      if (downloadErr.message.includes('closed') || (page && page.isClosed())) {
+        throw new Error(`Target page, context or browser has been closed saat native download: ${downloadErr.message}`);
       }
-      strategyUsed = 'LOCAL_FILE_RECOVERY';
+      console.warn(`[DOWNLOAD] Native download event gagal (${downloadErr.message}).`);
+      throw new Error(`Seluruh strategi download gagal. Blob URL tidak valid & download event error: ${downloadErr.message}`);
     }
   }
 
@@ -354,34 +416,6 @@ async function downloadFile({
     elapsedMs,
     strategy: strategyUsed
   };
-}
-
-/**
- * Emergency scan fallback strictly for local project downloads directory.
- */
-async function scanLocalOutputFallback(downloadDir, targetPath, startTime, timeoutMs = 3000) {
-  const maxPolls = Math.floor(timeoutMs / 500);
-  for (let i = 0; i < maxPolls; i++) {
-    if (fs.existsSync(targetPath) && fs.statSync(targetPath).size > 1000) {
-      return targetPath;
-    }
-    if (fs.existsSync(downloadDir)) {
-      const localFiles = fs.readdirSync(downloadDir).filter(f => f.endsWith('.wav'));
-      const newestLocal = localFiles.map(f => {
-        const full = path.join(downloadDir, f);
-        return { path: full, mtime: fs.statSync(full).mtimeMs, size: fs.statSync(full).size };
-      }).filter(f => f.mtime >= startTime - 2000 && f.size > 1000).sort((a, b) => b.mtime - a.mtime)[0];
-
-      if (newestLocal) {
-        if (newestLocal.path !== targetPath) {
-          try { await fs.promises.copyFile(newestLocal.path, targetPath); } catch (e) {}
-        }
-        return targetPath;
-      }
-    }
-    await new Promise(r => setTimeout(r, 500));
-  }
-  return null;
 }
 
 /**
@@ -416,43 +450,14 @@ async function downloadWithRetry(options, maxRetries = 1) {
   throw lastError;
 }
 
-/**
- * Backward-compatible helper for legacy callers.
- */
-async function captureGeneratedAudio(page, context, destinationPath, timeout = 45000, baselineSnapshot = []) {
-  if (!page || page.isClosed()) {
-    throw new Error('Page sudah ditutup sebelum proses captureGeneratedAudio dimulai');
-  }
-
-  const downloadDir = path.dirname(destinationPath);
-  const customFilename = path.basename(destinationPath);
-
-  const result = await downloadWithRetry({
-    page,
-    downloadDir,
-    customFilename,
-    timeout,
-    baselineSnapshot,
-    trigger: async () => {
-      if (page.isClosed()) return;
-      const downloadSelector = 'button[aria-label*="Download" i], button:has-text("Download")';
-      const downloadBtn = page.locator(downloadSelector).first();
-      if (await downloadBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-        await downloadBtn.scrollIntoViewIfNeeded().catch(() => {});
-        await downloadBtn.click({ force: true });
-      }
-    }
-  }, 1);
-
-  return result.path;
-}
-
 module.exports = {
   sanitizeFilename,
+  extractBaselineBlobUrls,
+  isFreshBlob,
+  findFreshBlobAudio,
   captureAudioElementsSnapshot,
   findTargetAudioElement,
   extractBlobDirectly,
   downloadFile,
-  downloadWithRetry,
-  captureGeneratedAudio
+  downloadWithRetry
 };
