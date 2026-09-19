@@ -61,10 +61,44 @@ function formatJobOutput(job, baseUrl = '', queuePosition = 0) {
   if (!job) return null;
 
   const statusUrl = baseUrl ? `${baseUrl}/api/tts/jobs/${job.id}` : `/api/tts/jobs/${job.id}`;
+  const directAudioUrl = baseUrl ? `${baseUrl}/api/tts/jobs/${job.id}/audio` : `/api/tts/jobs/${job.id}/audio`;
+
+  let formattedResult = null;
+  let primaryAudioUrl = null;
+
+  if (job.result) {
+    const files = (job.result.files || []).map(f => {
+      const downloadUrl = f.downloadUrl || `/api/tts/download/${f.filename}`;
+      const fullUrl = baseUrl && !downloadUrl.startsWith('http') ? `${baseUrl}${downloadUrl}` : downloadUrl;
+      return {
+        ...f,
+        downloadUrl,
+        url: fullUrl,
+        audio_url: fullUrl,
+        audioUrl: fullUrl
+      };
+    });
+
+    primaryAudioUrl = files[0] ? files[0].url : (job.result.url || null);
+    const allUrls = files.map(f => f.url);
+
+    formattedResult = {
+      url: primaryAudioUrl,
+      audio_url: primaryAudioUrl,
+      audioUrl: primaryAudioUrl,
+      audio_urls: allUrls.length > 0 ? allUrls : (job.result.audio_urls || []),
+      totalChunks: job.result.totalChunks || files.length,
+      voiceSettings: job.result.voiceSettings,
+      files: files
+    };
+  }
+
+  const effectiveAudioUrl = primaryAudioUrl || directAudioUrl;
 
   return {
     id: job.id,
     jobId: job.id,
+    ticket: job.id,
     status: job.status,
     progress: job.progress,
     stage: job.stage,
@@ -76,6 +110,10 @@ function formatJobOutput(job, baseUrl = '', queuePosition = 0) {
     startedAt: job.startedAt,
     completedAt: job.completedAt,
     durationSeconds: job.durationSeconds,
+    audioUrl: job.status === 'completed' ? effectiveAudioUrl : null,
+    audio_url: job.status === 'completed' ? effectiveAudioUrl : null,
+    downloadUrl: job.status === 'completed' ? effectiveAudioUrl : null,
+    url: job.status === 'completed' ? effectiveAudioUrl : null,
     params: {
       textSnippet: job.params.text.slice(0, 100) + (job.params.text.length > 100 ? '...' : ''),
       wordCount: job.params.wordCount,
@@ -86,30 +124,7 @@ function formatJobOutput(job, baseUrl = '', queuePosition = 0) {
       autoChunk: job.params.autoChunk,
       maxWordsPerChunk: job.params.maxWordsPerChunk
     },
-    result: job.result ? (() => {
-      const files = (job.result.files || []).map(f => {
-        const downloadUrl = f.downloadUrl || `/api/tts/download/${f.filename}`;
-        const fullUrl = baseUrl && !downloadUrl.startsWith('http') ? `${baseUrl}${downloadUrl}` : downloadUrl;
-        return {
-          ...f,
-          downloadUrl,
-          url: fullUrl,
-          audio_url: fullUrl
-        };
-      });
-
-      const primaryUrl = files[0] ? files[0].url : (job.result.url || null);
-      const allUrls = files.map(f => f.url);
-
-      return {
-        url: primaryUrl,
-        audio_url: primaryUrl,
-        audio_urls: allUrls.length > 0 ? allUrls : (job.result.audio_urls || []),
-        totalChunks: job.result.totalChunks || files.length,
-        voiceSettings: job.result.voiceSettings,
-        files: files
-      };
-    })() : null,
+    result: formattedResult,
     error: job.error,
     statusUrl
   };

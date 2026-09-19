@@ -21,13 +21,19 @@ function createTtsRouter({ jobManager, ttsEngine, getBaseUrl }) {
       const job = jobManager.createJob(req.body);
       const formatted = jobManager.getJob(job.id, baseUrl);
 
+      const directAudioUrl = baseUrl ? `${baseUrl}/api/tts/jobs/${formatted.id}/audio` : `/api/tts/jobs/${formatted.id}/audio`;
+
       res.status(202).json({
         success: true,
         message: 'Pekerjaan TTS berhasil dibuat dan dimasukkan ke dalam antrian.',
+        ticket: formatted.id,
         jobId: formatted.id,
         status: formatted.status,
         queuePosition: formatted.queuePosition,
         statusUrl: formatted.statusUrl,
+        audioUrl: directAudioUrl,
+        audio_url: directAudioUrl,
+        downloadUrl: directAudioUrl,
         job: formatted
       });
     } catch (err) {
@@ -101,13 +107,19 @@ function createTtsRouter({ jobManager, ttsEngine, getBaseUrl }) {
       }
 
       const formatted = jobManager.getJob(job.id, baseUrl);
+      const directAudioUrl = baseUrl ? `${baseUrl}/api/tts/jobs/${formatted.id}/audio` : `/api/tts/jobs/${formatted.id}/audio`;
+
       res.status(202).json({
         success: true,
         message: 'Pekerjaan TTS berhasil dibuat. Gunakan statusUrl atau jobId untuk memantau progres.',
+        ticket: formatted.id,
         jobId: formatted.id,
         status: formatted.status,
         queuePosition: formatted.queuePosition,
         statusUrl: formatted.statusUrl,
+        audioUrl: directAudioUrl,
+        audio_url: directAudioUrl,
+        downloadUrl: directAudioUrl,
         job: formatted
       });
     } catch (err) {
@@ -119,12 +131,80 @@ function createTtsRouter({ jobManager, ttsEngine, getBaseUrl }) {
     }
   });
 
-  // 6. Stream / Download berkas audio
-  router.get('/download/:filename', (req, res) => {
-    const filename = path.basename(req.params.filename);
-    const filePath = path.join(ttsEngine.downloadsDir, filename);
+  // 6. Endpoint unduh audio berbasis Ticket / Job ID (Kompatibel dengan ElevenLabs / Standard API)
+  router.get('/jobs/:id/audio', (req, res) => {
+    const rawId = req.params.id || '';
+    const cleanId = rawId.replace(/\.wav$/i, '');
+    const job = jobManager.jobs.get(cleanId) || jobManager.jobs.get(rawId);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        error: `Pekerjaan dengan ID "${req.params.id}" tidak ditemukan.`
+      });
+    }
+
+    if (job.status !== 'completed' || !job.result || !Array.isArray(job.result.files) || job.result.files.length === 0) {
+      return res.status(409).json({
+        success: false,
+        error: 'Berkas audio belum siap atau pekerjaan belum selesai.',
+        status: job.status,
+        progress: job.progress
+      });
+    }
+
+    const fileObj = job.result.files[0];
+    let filePath = fileObj.filePath;
+    if (!filePath || !fs.existsSync(filePath)) {
+      filePath = path.join(ttsEngine.downloadsDir, fileObj.filename);
+    }
 
     if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ success: false, error: 'File audio tidak ditemukan di server.' });
+    }
+
+    if (req.query.download === 'true' || req.query.download === '1') {
+      return res.download(filePath, fileObj.filename);
+    }
+
+    res.sendFile(filePath, {
+      headers: {
+        'Content-Type': 'audio/wav',
+        'Accept-Ranges': 'bytes'
+      }
+    });
+  });
+
+  // 7. Stream / Download berkas audio berdasarkan nama berkas atau ID pekerjaan
+  router.get('/download/:filename', (req, res) => {
+    let filename = path.basename(req.params.filename);
+    let filePath = path.join(ttsEngine.downloadsDir, filename);
+
+    // 1. Cek langsung nama file
+    if (!fs.existsSync(filePath)) {
+      // Coba jika nama file tanpa ekstensi .wav
+      if (!path.extname(filename) && fs.existsSync(`${filePath}.wav`)) {
+        filePath = `${filePath}.wav`;
+        filename = `${filename}.wav`;
+      }
+    }
+
+    // 2. Jika belum ditemukan, periksa apakah parameter adalah jobId
+    if (!fs.existsSync(filePath)) {
+      const cleanId = filename.replace(/\.wav$/i, '');
+      const job = jobManager.jobs.get(cleanId) || jobManager.jobs.get(filename);
+      if (job && job.result && Array.isArray(job.result.files) && job.result.files.length > 0) {
+        const fileObj = job.result.files[0];
+        const possiblePath = fileObj.filePath || path.join(ttsEngine.downloadsDir, fileObj.filename);
+        if (fs.existsSync(possiblePath)) {
+          filePath = possiblePath;
+          filename = fileObj.filename;
+        }
+      }
+    }
+
+    if (!fs.existsSync(filePath)) {
+      console.warn(`[Download] File audio tidak ditemukan untuk parameter: "${req.params.filename}"`);
       return res.status(404).json({ success: false, error: 'File audio tidak ditemukan.' });
     }
 

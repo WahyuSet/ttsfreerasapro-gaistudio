@@ -91,7 +91,9 @@ app.get('/api/status', (req, res) => {
 });
 
 // Mount modular sub-routers
-app.use('/api/tts', createTtsRouter({ jobManager, ttsEngine, getBaseUrl }));
+const ttsRouter = createTtsRouter({ jobManager, ttsEngine, getBaseUrl });
+app.use('/api/tts', ttsRouter);
+app.use('/', ttsRouter);
 app.use('/api', createRecorderRouter({ recorder, runner }));
 
 // Graceful Shutdown Endpoint for local runner
