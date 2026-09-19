@@ -104,14 +104,12 @@ x-api-key: IkPzTzClQrVGj73OMWIm7TPkRTHnlj7M
 | `style` | `string` | Opsional | `"Vocal Smile"` | Gaya bicara (`Vocal Smile`, `Natural`, `Whisper`, `Cheer`, `Serious`, `Empathetic`). |
 | `pace` | `string` | Opsional | `"Natural"` | Kecepatan (`Very Slow`, `Slow`, `Natural`, `Fast`, `Very Fast`). |
 | `accent` | `string` | Opsional | `"Neutral"` | Aksen pembawaan (`Neutral`, `American`, `British`, `Australian`, `Indian`). |
-| `scene` | `string` | Opsional | Deskripsi latar | Konteks suasana untuk AI. |
-| `sampleContext` | `string` | Opsional | Karakter gaya | Nuansa percakapan. |
-| `persona` | `string` | Opsional | Karakter persona | Deskripsi persona pembicara. |
 | `autoChunk` | `boolean` | Opsional | `true` | Jika `true`, teks panjang (>300 kata) otomatis dipecah per bagian agar render tidak terpotong. |
 | `maxWordsPerChunk` | `number` | Opsional | `300` | Batas jumlah kata per bagian pemotongan. |
 
 > [!NOTE]
-> Anda **TIDAK PERLU** mengetik `"Speaker 1 : "` di awal teks. Server otomatis menambahkan prefiks pembicara di latar belakang secara cerdas.
+> Parameter **Scene**, **Sample Context**, dan **Voice Director / Persona** telah di-hardcode secara optimal di level server untuk menghasilkan intonasi storytelling yang alami dan engaging, sehingga klien **hanya perlu mengirim `text` dan `voice`** (opsional: `style`, `pace`, `accent`).
+> Anda juga **TIDAK PERLU** mengetik `"Speaker 1 : "` di awal teks. Server otomatis menangani prefiks pembicara di antarmuka Google AI Studio.
 
 #### Contoh Request:
 ```json

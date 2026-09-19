@@ -27,6 +27,10 @@ function normalizeVoiceName(name) {
   return matched || trimmed;
 }
 
+const HARDCODED_SCENE = 'A modern study room, explaining everyday science concepts to curious peers.';
+const HARDCODED_SAMPLE_CONTEXT = 'Warm, encouraging, speaking like an older sibling sharing cool trivia, upbeat yet gentle pacing.';
+const HARDCODED_PERSONA = 'A relaxed and engaging storyteller, talking like a close friend sharing cool trivia, upbeat and lighthearted.';
+
 /**
  * Konfigurasi lingkungan Studio Google AI TTS sebelum perenderan audio dimulai.
  * @param {import('playwright').Page} page
@@ -39,11 +43,12 @@ async function setupTtsStudio(page, params, onProgress, totalChunks) {
     voice = 'Zephyr',
     style = 'Vocal Smile',
     pace = 'Natural',
-    accent = 'Neutral',
-    scene = 'A modern study room, explaining everyday science concepts to curious peers.',
-    sampleContext = 'Warm, encouraging, speaking like an older sibling sharing cool trivia, upbeat yet gentle pacing.',
-    persona = 'A relaxed and engaging storyteller, talking like a close friend sharing cool trivia, upbeat and lighthearted.'
+    accent = 'Neutral'
   } = params;
+
+  const scene = HARDCODED_SCENE;
+  const sampleContext = HARDCODED_SAMPLE_CONTEXT;
+  const persona = HARDCODED_PERSONA;
 
   const targetVoice = normalizeVoiceName(voice);
 

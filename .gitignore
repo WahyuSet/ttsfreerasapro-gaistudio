@@ -1,8 +1,6 @@
 node_modules/
 profiles/
-downloads/*.wav
-downloads/*.png
-downloads/jobs_data.json
+downloads/
 recordings/
 scratch/
 .env
