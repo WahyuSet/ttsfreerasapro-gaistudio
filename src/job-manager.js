@@ -1,95 +1,46 @@
 const EventEmitter = require('events');
-const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { loadJobsFromDisk, saveJobsToDisk, formatJobOutput } = require('./job-storage');
 
-/**
- * Job Status Enum:
- * - 'queued': Menunggu giliran dalam antrian
- * - 'processing': Sedang diproses oleh engine / browser
- * - 'completed': Selesai dirender dan audio siap diunduh
- * - 'failed': Terjadi kendala / error saat proses
- * - 'cancelled': Dibatalkan sebelum diproses
- */
 class JobManager extends EventEmitter {
   constructor(options = {}) {
     super();
     this.storageFile = options.storageFile || path.resolve(__dirname, '..', 'downloads', 'jobs_data.json');
     this.maxHistory = options.maxHistory || 200;
-    this.jobs = new Map(); // jobId -> Job
-    this.queue = [];       // array of jobId
+    this.jobs = new Map();
+    this.queue = [];
     this.currentJob = null;
     this.isProcessing = false;
-    this.workerFn = null;  // function(job, onProgress) -> Promise<result>
+    this.workerFn = null;
 
-    this._loadFromStorage();
+    loadJobsFromDisk(this.storageFile, this.jobs);
   }
 
-  /**
-   * Daftarkan worker function dari TtsEngine
-   */
   setWorker(fn) {
     this.workerFn = fn;
   }
 
-  /**
-   * Muat riwayat pekerjaan sebelumnya dari disk jika ada
-   */
-  _loadFromStorage() {
-    try {
-      if (fs.existsSync(this.storageFile)) {
-        const raw = fs.readFileSync(this.storageFile, 'utf8');
-        const list = JSON.parse(raw);
-        if (Array.isArray(list)) {
-          for (const item of list) {
-            // Jika ada job yang tertinggal dalam status processing/queued saat server mati, tandai failed
-            if (item.status === 'processing' || item.status === 'queued') {
-              item.status = 'failed';
-              item.error = 'Server dimatikan atau direstart sebelum pekerjaan selesai.';
-              item.completedAt = item.completedAt || new Date().toISOString();
-            }
-            this.jobs.set(item.id, item);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[JobManager] Gagal memuat jobs_data.json:', err.message);
-    }
-  }
-
-  /**
-   * Simpan riwayat pekerjaan ke disk (maksimal maxHistory data terbaru)
-   */
   _saveToStorage() {
-    try {
-      const dir = path.dirname(this.storageFile);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-
-      // Ambil jobs terbaru
-      const list = Array.from(this.jobs.values())
-        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-        .slice(0, this.maxHistory);
-
-      fs.writeFileSync(this.storageFile, JSON.stringify(list, null, 2), 'utf8');
-    } catch (err) {
-      console.warn('[JobManager] Gagal menyimpan jobs_data.json:', err.message);
-    }
+    saveJobsToDisk(this.storageFile, this.jobs, this.maxHistory);
   }
 
-  /**
-   * Generate unique job ID
-   */
   _generateJobId() {
     const timestamp = Date.now();
     const rand = crypto.randomBytes(4).toString('hex');
     return `job_${timestamp}_${rand}`;
   }
 
-  /**
-   * Buat job baru dan masukkan ke antrian
-   */
+  getQueuePosition(jobId) {
+    const idx = this.queue.indexOf(jobId);
+    return idx >= 0 ? idx + 1 : 0;
+  }
+
+  _formatJobOutput(job, baseUrl = '') {
+    const queuePos = job.status === 'queued' ? this.getQueuePosition(job.id) : 0;
+    return formatJobOutput(job, baseUrl, queuePos);
+  }
+
   createJob(params) {
     if (!params || !params.text || typeof params.text !== 'string' || !params.text.trim()) {
       throw new Error('Parameter "text" wajib diisi berupa string tidak kosong.');
@@ -136,95 +87,16 @@ class JobManager extends EventEmitter {
     this.emit('job:created', this._formatJobOutput(job));
     this._saveToStorage();
 
-    // Trigger antrian
     setImmediate(() => this._processQueue());
-
     return this._formatJobOutput(job);
   }
 
-  /**
-   * Hitung posisi antrian saat ini
-   */
-  getQueuePosition(jobId) {
-    const idx = this.queue.indexOf(jobId);
-    return idx >= 0 ? idx + 1 : 0;
-  }
-
-  /**
-   * Format job untuk dikirim ke API response
-   */
-  _formatJobOutput(job, baseUrl = '') {
-    if (!job) return null;
-
-    const queuePosition = job.status === 'queued' ? this.getQueuePosition(job.id) : 0;
-    const statusUrl = baseUrl ? `${baseUrl}/api/tts/jobs/${job.id}` : `/api/tts/jobs/${job.id}`;
-
-    // Format output bersih
-    return {
-      id: job.id,
-      jobId: job.id,
-      status: job.status,
-      progress: job.progress,
-      stage: job.stage,
-      message: job.message,
-      queuePosition: queuePosition,
-      currentPart: job.currentPart || 0,
-      totalParts: job.totalParts || 0,
-      createdAt: job.createdAt,
-      startedAt: job.startedAt,
-      completedAt: job.completedAt,
-      durationSeconds: job.durationSeconds,
-      params: {
-        textSnippet: job.params.text.slice(0, 100) + (job.params.text.length > 100 ? '...' : ''),
-        wordCount: job.params.wordCount,
-        voice: job.params.voice,
-        style: job.params.style,
-        pace: job.params.pace,
-        accent: job.params.accent,
-        autoChunk: job.params.autoChunk,
-        maxWordsPerChunk: job.params.maxWordsPerChunk
-      },
-      result: job.result ? (() => {
-        const files = (job.result.files || []).map(f => {
-          const downloadUrl = f.downloadUrl || `/api/tts/download/${f.filename}`;
-          const fullUrl = baseUrl && !downloadUrl.startsWith('http') ? `${baseUrl}${downloadUrl}` : downloadUrl;
-          return {
-            ...f,
-            downloadUrl,
-            url: fullUrl,
-            audio_url: fullUrl
-          };
-        });
-
-        const primaryUrl = files[0] ? files[0].url : (job.result.url || null);
-        const allUrls = files.map(f => f.url);
-
-        return {
-          url: primaryUrl,
-          audio_url: primaryUrl,
-          audio_urls: allUrls.length > 0 ? allUrls : (job.result.audio_urls || []),
-          totalChunks: job.result.totalChunks || files.length,
-          voiceSettings: job.result.voiceSettings,
-          files: files
-        };
-      })() : null,
-      error: job.error,
-      statusUrl
-    };
-  }
-
-  /**
-   * Ambil data job berdasarkan ID
-   */
   getJob(jobId, baseUrl = '') {
     const job = this.jobs.get(jobId);
     if (!job) return null;
     return this._formatJobOutput(job, baseUrl);
   }
 
-  /**
-   * Ambil daftar riwayat job dengan filter & pagination
-   */
   listJobs(options = {}, baseUrl = '') {
     const { status, limit = 50, offset = 0 } = options;
     let list = Array.from(this.jobs.values())
@@ -237,65 +109,34 @@ class JobManager extends EventEmitter {
     const total = list.length;
     const paginated = list.slice(Number(offset), Number(offset) + Number(limit));
 
-    const stats = this.getStats();
-
     return {
       total,
       limit: Number(limit),
       offset: Number(offset),
-      stats,
+      stats: this.getStats(),
       jobs: paginated.map(j => this._formatJobOutput(j, baseUrl))
     };
   }
 
-  /**
-   * Batalkan job yang masih berada di antrian
-   */
   cancelJob(jobId) {
     const job = this.jobs.get(jobId);
-    if (!job) {
-      return { success: false, message: 'Pekerjaan tidak ditemukan.' };
-    }
+    if (!job) return { success: false, message: 'Pekerjaan tidak ditemukan.', job: null };
+    if (job.status === 'completed') return { success: false, message: 'Pekerjaan sudah selesai dan tidak dapat dibatalkan.', job: this._formatJobOutput(job) };
+    if (job.status === 'cancelled') return { success: true, message: 'Pekerjaan sudah berstatus dibatalkan sebelumnya.', job: this._formatJobOutput(job) };
 
-    if (job.status === 'completed') {
-      return { success: false, message: 'Pekerjaan sudah selesai, tidak dapat dibatalkan.' };
-    }
-
-    if (job.status === 'cancelled') {
-      return { success: false, message: 'Pekerjaan sudah dibatalkan sebelumnya.' };
-    }
-
-    if (job.status === 'processing') {
-      return {
-        success: false,
-        message: 'Pekerjaan sedang diproses oleh browser dan tidak dapat dibatalkan di tengah jalan.'
-      };
-    }
-
-    // Hapus dari antrian
-    const queueIdx = this.queue.indexOf(jobId);
-    if (queueIdx >= 0) {
-      this.queue.splice(queueIdx, 1);
-    }
+    const qIdx = this.queue.indexOf(jobId);
+    if (qIdx >= 0) this.queue.splice(qIdx, 1);
 
     job.status = 'cancelled';
     job.stage = 'cancelled';
-    job.message = 'Pekerjaan dibatalkan oleh pengguna sebelum dieksekusi.';
+    job.message = 'Pekerjaan dibatalkan oleh pengguna.';
     job.completedAt = new Date().toISOString();
 
     this.emit('job:cancelled', this._formatJobOutput(job));
     this._saveToStorage();
-
-    return {
-      success: true,
-      message: `Pekerjaan ${jobId} berhasil dibatalkan.`,
-      job: this._formatJobOutput(job)
-    };
+    return { success: true, message: `Pekerjaan ${jobId} berhasil dibatalkan.`, job: this._formatJobOutput(job) };
   }
 
-  /**
-   * Update progres pekerjaan saat worker sedang berjalan
-   */
   updateProgress(jobId, update = {}) {
     const job = this.jobs.get(jobId);
     if (!job || job.status !== 'processing') return;
@@ -311,16 +152,8 @@ class JobManager extends EventEmitter {
     this.emit('job:progress', this._formatJobOutput(job));
   }
 
-  /**
-   * Ringkasan statistik antrian & status
-   */
   getStats() {
-    let queued = 0;
-    let processing = 0;
-    let completed = 0;
-    let failed = 0;
-    let cancelled = 0;
-
+    let queued = 0, processing = 0, completed = 0, failed = 0, cancelled = 0;
     for (const job of this.jobs.values()) {
       if (job.status === 'queued') queued++;
       else if (job.status === 'processing') processing++;
@@ -341,18 +174,11 @@ class JobManager extends EventEmitter {
     };
   }
 
-  /**
-   * Eksekutor antrian pekerjaan berurutan
-   */
   async _processQueue() {
-    if (this.isProcessing || this.queue.length === 0) {
-      return;
-    }
+    if (this.isProcessing || this.queue.length === 0) return;
 
     const nextJobId = this.queue.shift();
     const job = this.jobs.get(nextJobId);
-
-    // Jika job sudah tidak ada atau sudah dibatalkan
     if (!job || job.status === 'cancelled') {
       return setImmediate(() => this._processQueue());
     }
@@ -376,18 +202,16 @@ class JobManager extends EventEmitter {
       }
 
       console.log(`\n================================================================`);
-      console.log(`[JobManager] 🚀 Menjalankan Pekerjaan: ${job.id}`);
+      console.log(`[JobManager] Menjalankan Pekerjaan: ${job.id}`);
       console.log(`[JobManager] Teks: "${job.params.text.slice(0, 70)}..." (${job.params.wordCount} kata)`);
       console.log(`[JobManager] Suara: ${job.params.voice} | Gaya: ${job.params.style}`);
-      console.log(`================================================================`);
+      console.log('================================================================');
 
       const result = await this.workerFn(job.params, (progressUpdate) => {
         this.updateProgress(job.id, progressUpdate);
       });
 
-      // Hitung durasi
       const durationSeconds = Math.round((Date.now() - startTime) / 1000);
-
       job.status = 'completed';
       job.progress = 100;
       job.stage = 'completed';
@@ -396,7 +220,7 @@ class JobManager extends EventEmitter {
       job.durationSeconds = durationSeconds;
       job.result = result;
 
-      console.log(`[JobManager] ✅ Pekerjaan ${job.id} SUKSES dalam ${durationSeconds} detik!`);
+      console.log(`[JobManager] Pekerjaan ${job.id} SUKSES dalam ${durationSeconds} detik!`);
       this.emit('job:completed', this._formatJobOutput(job));
 
     } catch (err) {
@@ -408,63 +232,38 @@ class JobManager extends EventEmitter {
       job.completedAt = new Date().toISOString();
       job.durationSeconds = durationSeconds;
 
-      console.error(`[JobManager] ❌ Pekerjaan ${job.id} GAGAL:`, err.message);
+      console.error(`[JobManager] Pekerjaan ${job.id} GAGAL:`, err.message);
       this.emit('job:failed', this._formatJobOutput(job));
 
     } finally {
       this.isProcessing = false;
       this.currentJob = null;
       this._saveToStorage();
-
-      // Lanjutkan antrian berikutnya
       setImmediate(() => this._processQueue());
     }
   }
 
-  /**
-   * Menunggu suatu job hingga selesai (berguna untuk endpoint sync / generate?sync=true)
-   */
   waitForJob(jobId, timeoutMs = 600000) {
     return new Promise((resolve, reject) => {
       const job = this.jobs.get(jobId);
-      if (!job) {
-        return reject(new Error('Pekerjaan tidak ditemukan.'));
-      }
-
-      if (job.status === 'completed') {
-        return resolve(this._formatJobOutput(job));
-      }
-      if (job.status === 'failed') {
-        return reject(new Error(job.error || 'Pekerjaan gagal diproses.'));
-      }
-      if (job.status === 'cancelled') {
-        return reject(new Error('Pekerjaan telah dibatalkan.'));
-      }
+      if (!job) return reject(new Error('Pekerjaan tidak ditemukan.'));
+      if (job.status === 'completed') return resolve(this._formatJobOutput(job));
+      if (job.status === 'failed') return reject(new Error(job.error || 'Pekerjaan gagal diproses.'));
+      if (job.status === 'cancelled') return reject(new Error('Pekerjaan telah dibatalkan.'));
 
       const timer = setTimeout(() => {
         cleanup();
-        reject(new Error(`Timeout menunggu penyelesaian pekerjaan (${Math.round(timeoutMs / 1000)} detik). Pekerjaan masih berjalan di latar belakang.`));
+        reject(new Error(`Timeout menunggu penyelesaian pekerjaan (${Math.round(timeoutMs / 1000)} detik).`));
       }, timeoutMs);
 
       const onCompleted = (completedJob) => {
-        if (completedJob.id === jobId) {
-          cleanup();
-          resolve(completedJob);
-        }
+        if (completedJob.id === jobId) { cleanup(); resolve(completedJob); }
       };
-
       const onFailed = (failedJob) => {
-        if (failedJob.id === jobId) {
-          cleanup();
-          reject(new Error(failedJob.error || 'Pekerjaan gagal diproses.'));
-        }
+        if (failedJob.id === jobId) { cleanup(); reject(new Error(failedJob.error || 'Pekerjaan gagal diproses.')); }
       };
-
       const onCancelled = (cancelledJob) => {
-        if (cancelledJob.id === jobId) {
-          cleanup();
-          reject(new Error('Pekerjaan dibatalkan.'));
-        }
+        if (cancelledJob.id === jobId) { cleanup(); reject(new Error('Pekerjaan dibatalkan.')); }
       };
 
       const cleanup = () => {

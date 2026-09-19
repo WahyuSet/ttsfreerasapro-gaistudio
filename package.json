@@ -5,7 +5,9 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
+    "login": "node login.js",
     "record": "node cli.js",
+    "test:api": "node test/hit-tts-api.js",
     "test:stealth": "node test/test-stealth.js",
     "test:jobs": "node test/test-jobs-api.js",
     "test:recovery": "node test/test-tts-recovery.js",

@@ -1,246 +1,11 @@
 const path = require('path');
 const fs = require('fs');
 const { launchStealthChrome } = require('./stealth-browser');
-const { humanClick, humanPaste, humanDelay } = require('./human-behavior');
-const {
-  downloadWithRetry,
-  captureAudioElementsSnapshot,
-  extractBaselineBlobUrls
-} = require('./audio-downloader');
-
-/**
- * Normalizes pill text for comparisons (removes non-alphanumeric, lowercases).
- * @param {string} val
- * @returns {string}
- */
-function normalizePillValue(val) {
-  if (!val || typeof val !== 'string') return '';
-  return val.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-/**
- * Pure helper to verify if an element's text or aria-label matches the target pill value.
- * @param {string} actualText
- * @param {string} targetVal
- * @returns {boolean}
- */
-function isPillValueMatching(actualText, targetVal) {
-  if (!actualText || !targetVal) return false;
-  const normActual = normalizePillValue(actualText);
-  const normTarget = normalizePillValue(targetVal);
-  return normActual.includes(normTarget);
-}
-
-/**
- * Selects a voice setting dropdown pill (Style, Pace, Accent) with robust Angular CDK overlay handling,
- * idempotency checks, visible container scoping, and strict postcondition verification.
- *
- * @param {import('playwright').Page} page
- * @param {'Style'|'Pace'|'Accent'} pillName
- * @param {string} targetVal
- */
-async function selectVoicePill(page, pillName, targetVal) {
-  if (!targetVal) return;
-  if (pillName.toLowerCase() === 'accent') {
-    console.log(`[TtsEngine] ⏩ Mengabaikan pemilihan Accent sesuai preferensi.`);
-    return;
-  }
-  console.log(`[TtsEngine] 🎛️ Memilih ${pillName}: "${targetVal}"...`);
-
-  // 1. Tunggu overlay/backdrop sebelumnya benar-benar selesai menutup/detach
-  await page.waitForSelector('.cdk-overlay-backdrop', { state: 'detached', timeout: 3500 }).catch(() => {});
-  await humanDelay(250, 450);
-
-  // 2. Temukan tombol pill berdasarkan aria-label atau text
-  const pillBtn = page.locator(`button[aria-label="${pillName}" i], button[aria-label*="${pillName}" i], button:has-text("${pillName}")`).first();
-  if (!(await pillBtn.isVisible({ timeout: 3500 }).catch(() => false))) {
-    console.warn(`[TtsEngine] ⚠️ Tombol pill ${pillName} tidak ditemukan.`);
-    return;
-  }
-
-  // 3. Cek Idempotency: Jika nilai saat ini sudah sama dengan targetVal, lewati klik
-  const currentText = await pillBtn.innerText().catch(() => '');
-  const currentAria = await pillBtn.getAttribute('aria-label').catch(() => '');
-  if (isPillValueMatching(currentText, targetVal) || (isPillValueMatching(currentAria, targetVal) && !currentAria.toLowerCase().endsWith(pillName.toLowerCase()))) {
-    console.log(`[TtsEngine] ✓ ${pillName} sudah bernilai "${targetVal}" (idempotent, lewati pemilihan).`);
-    return;
-  }
-
-  // 4. Buka menu dropdown pill
-  await pillBtn.scrollIntoViewIfNeeded().catch(() => {});
-  await pillBtn.click().catch(async () => {
-    await pillBtn.click({ force: true });
-  });
-
-  // 5. Tunggu container overlay CDK muncul dan terlihat
-  await page.waitForSelector('.cdk-overlay-container .cdk-overlay-pane', { state: 'visible', timeout: 4000 }).catch(() => {});
-  await humanDelay(350, 550);
-
-  // 6. Pilih opsi target dari overlay aktif yang paling baru (teratas di DOM)
-  const overlayPanes = page.locator('.cdk-overlay-container .cdk-overlay-pane');
-  const activePane = overlayPanes.last();
-
-  // Pola pencarian bertahap:
-  // a. Exact match (e.g. ^Neutral$, ^Natural$)
-  const exactRegex = new RegExp(`^\\s*${targetVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
-  // b. Word boundary match
-  const wordRegex = new RegExp(`\\b${targetVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-
-  let optionBtn = activePane.locator('[role="menuitem"], .mat-mdc-menu-item, button').filter({ hasText: exactRegex }).first();
-  if (!(await optionBtn.isVisible({ timeout: 1500 }).catch(() => false))) {
-    optionBtn = activePane.locator('.preset-label, .preset-description, span').filter({ hasText: exactRegex }).first();
-  }
-  if (!(await optionBtn.isVisible({ timeout: 1500 }).catch(() => false))) {
-    optionBtn = activePane.locator('[role="menuitem"], .mat-mdc-menu-item, button').filter({ hasText: wordRegex }).first();
-  }
-  if (!(await optionBtn.isVisible({ timeout: 1500 }).catch(() => false))) {
-    // Fallback pencarian jika overlay scoping tidak menangkap
-    optionBtn = page.locator(`.cdk-overlay-container [role="menuitem"]:has-text("${targetVal}"), .cdk-overlay-container button:has-text("${targetVal}")`).last();
-  }
-
-  if (await optionBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await optionBtn.scrollIntoViewIfNeeded().catch(() => {});
-    await optionBtn.click({ force: true }).catch(async () => await optionBtn.click());
-    console.log(`[TtsEngine] Klik opsi "${targetVal}" pada menu ${pillName}.`);
-  } else {
-    await page.keyboard.press('Escape').catch(() => {});
-    console.warn(`[TtsEngine] ⚠️ Opsi "${targetVal}" tidak ditemukan dalam menu dropdown ${pillName}, melanjutkan.`);
-  }
-
-  // 7. Tunggu backdrop menutup sepenuhnya
-  await page.waitForSelector('.cdk-overlay-backdrop', { state: 'detached', timeout: 4000 }).catch(() => {});
-  await humanDelay(350, 650);
-
-  // 8. Postcondition Verification: Pastikan tombol pill sekarang mencerminkan targetVal
-  const verifiedText = await pillBtn.innerText().catch(() => '');
-  const verifiedAria = await pillBtn.getAttribute('aria-label').catch(() => '');
-  const isVerified = isPillValueMatching(verifiedText, targetVal) || isPillValueMatching(verifiedAria, targetVal);
-
-  if (!isVerified) {
-    console.warn(`[TtsEngine] ⚠️ Postcondition verification notice untuk ${pillName}: teks aktual="${verifiedText}" (aria="${verifiedAria}"). Melanjutkan ke pemilihan suara.`);
-  } else {
-    console.log(`[TtsEngine] ✓ Konfigurasi ${pillName} terverifikasi: "${targetVal}".`);
-  }
-}
-
-/**
- * Ensures prompt begins with "Speaker 1 : " or user-defined speaker prefix.
- * Automatically prepends "Speaker 1 : " if not already present.
- */
-function formatSpeakerPrompt(text, defaultSpeaker = 'Speaker 1') {
-  if (!text || typeof text !== 'string') return '';
-  const trimmed = text.trim();
-  if (/^speaker\s*\d+\s*:/i.test(trimmed)) {
-    return trimmed;
-  }
-  return `${defaultSpeaker} : ${trimmed}`;
-}
-
-/**
- * Split long text into smart, natural chunks based on sentences and paragraphs
- * Ensures no chunk exceeds maxWords and sentences are never cut in half.
- */
-function splitTextIntoChunks(text, maxWords = 300) {
-  if (!text || typeof text !== 'string') return [];
-  let cleanText = text.trim();
-  if (!cleanText) return [];
-
-  // If text already has a speaker label, extract it (e.g. "Speaker 1 :")
-  let speakerPrefix = 'Speaker 1';
-  const match = cleanText.match(/^(speaker\s*\d+)\s*:\s*/i);
-  if (match) {
-    speakerPrefix = match[1];
-    cleanText = cleanText.slice(match[0].length).trim();
-  }
-
-  const words = cleanText.split(/\s+/);
-  if (words.length <= maxWords) {
-    return [{
-      index: 1,
-      total: 1,
-      text: cleanText,
-      promptText: `${speakerPrefix} : ${cleanText}`,
-      wordCount: words.length
-    }];
-  }
-
-  // Split into sentences (preserving punctuation)
-  const sentenceRegex = /[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g;
-  const rawSentences = cleanText.match(sentenceRegex) || [cleanText];
-
-  const chunks = [];
-  let currentChunk = [];
-  let currentWordCount = 0;
-
-  for (const sentence of rawSentences) {
-    const trimmed = sentence.trim();
-    if (!trimmed) continue;
-    const sentWords = trimmed.split(/\s+/).length;
-
-    if (currentWordCount + sentWords > maxWords && currentChunk.length > 0) {
-      chunks.push(currentChunk.join(' '));
-      currentChunk = [trimmed];
-      currentWordCount = sentWords;
-    } else {
-      currentChunk.push(trimmed);
-      currentWordCount += sentWords;
-    }
-  }
-
-  if (currentChunk.length > 0) {
-    chunks.push(currentChunk.join(' '));
-  }
-
-  return chunks.map((chunkText, idx) => ({
-    index: idx + 1,
-    total: chunks.length,
-    text: chunkText,
-    promptText: `${speakerPrefix} : ${chunkText}`,
-    wordCount: chunkText.split(/\s+/).length
-  }));
-}
-
-/**
- * Automatically dismiss modals, onboarding prompts, or terms of service dialogs from Google AI Studio.
- */
-async function dismissPopups(page) {
-  if (!page || page.isClosed()) return;
-  try {
-    const dialogBtnSelectors = [
-      'mat-dialog-container button:has-text("Continue")',
-      'mat-dialog-container button:has-text("Get started")',
-      'mat-dialog-container button:has-text("I agree")',
-      'mat-dialog-container button:has-text("Accept")',
-      'mat-dialog-container button:has-text("Got it")',
-      'mat-dialog-container button:has-text("Dismiss")',
-      'mat-dialog-container button:has-text("Close")',
-      'button:has-text("Continue")',
-      'button:has-text("Get started")',
-      'button:has-text("I agree")',
-      'button:has-text("Accept")',
-      'button:has-text("Got it")',
-      'button:has-text("Dismiss")',
-      'div[role="dialog"] button:has-text("Continue")',
-      'div[role="dialog"] button:has-text("Get started")',
-      'div[role="dialog"] button:has-text("Accept")',
-      'div[role="dialog"] button:has-text("I agree")',
-      'div[role="dialog"] button:has-text("Got it")',
-      'button[aria-label="Close"]',
-      'button[aria-label="Dismiss"]'
-    ];
-
-    for (const selector of dialogBtnSelectors) {
-      const btn = page.locator(selector).first();
-      if (await btn.isVisible({ timeout: 300 }).catch(() => false)) {
-        console.log(`[TtsEngine] 🛡️ Menutup dialog modal popup Google AI Studio (${selector})...`);
-        await btn.click({ force: true }).catch(() => {});
-        await humanDelay(500, 800);
-      }
-    }
-  } catch (e) {
-    console.warn('[TtsEngine] Non-critical dismissPopups warning:', e.message);
-  }
-}
+const { humanDelay } = require('./human-behavior');
+const { formatSpeakerPrompt, splitTextIntoChunks } = require('./tts-text-utils');
+const { normalizePillValue, isPillValueMatching, selectVoicePill, dismissPopups } = require('./tts-ui-helpers');
+const { setupTtsStudio } = require('./tts-studio-config');
+const { renderChunkAudio } = require('./tts-render-chunk');
 
 class TtsEngine {
   constructor(options = {}) {
@@ -253,9 +18,6 @@ class TtsEngine {
     }
   }
 
-  /**
-   * Get current engine status
-   */
   getStatus() {
     return {
       isBusy: this.isBusy,
@@ -263,9 +25,6 @@ class TtsEngine {
     };
   }
 
-  /**
-   * Execution entry point for JobManager or direct invocation
-   */
   async execute(params, onProgress = () => {}) {
     if (this.isBusy) {
       throw new Error('TtsEngine sedang sibuk memproses pekerjaan lain.');
@@ -278,9 +37,6 @@ class TtsEngine {
     }
   }
 
-  /**
-   * Execute TTS generation in Windows Chrome via Playwright
-   */
   async _executeJob(params, onProgress = () => {}) {
     const {
       text,
@@ -288,9 +44,6 @@ class TtsEngine {
       style = 'Vocal Smile',
       pace = 'Natural',
       accent = 'Neutral',
-      scene = 'A modern study room, explaining everyday science concepts to curious peers.',
-      sampleContext = 'Warm, encouraging, speaking like an older sibling sharing cool trivia, upbeat yet gentle pacing.',
-      persona = 'A relaxed and engaging storyteller, talking like a close friend sharing cool trivia, upbeat and lighthearted.',
       autoChunk = true,
       maxWordsPerChunk = 300
     } = params;
@@ -299,7 +52,6 @@ class TtsEngine {
       throw new Error('Parameter "text" wajib diisi dan tidak boleh kosong.');
     }
 
-    // Determine chunks (Speaker 1 : is automatically handled)
     const chunks = autoChunk ? splitTextIntoChunks(text, maxWordsPerChunk) : [{
       index: 1,
       total: 1,
@@ -308,10 +60,10 @@ class TtsEngine {
       wordCount: text.trim().split(/\s+/).length
     }];
 
-    console.log(`\n================================================================`);
+    console.log('\n================================================================');
     console.log(`[TtsEngine] Memulai proses TTS (${chunks.length} bagian naskah)...`);
     console.log(`[TtsEngine] Voice: ${voice} | Style: ${style} | Pace: ${pace} | Accent: ${accent}`);
-    console.log(`================================================================`);
+    console.log('================================================================');
 
     onProgress({
       stage: 'initializing',
@@ -333,423 +85,42 @@ class TtsEngine {
     const generatedFiles = [];
 
     try {
-      // 1. Buka AI Studio TTS
-      onProgress({
-        stage: 'initializing',
-        progress: 15,
-        currentPart: 0,
-        totalParts: chunks.length,
-        message: 'Membuka Google AI Studio Gemini TTS...'
-      });
-      console.log('[TtsEngine] Membuka Google AI Studio...');
-      await page.goto('https://aistudio.google.com/generate-speech?model=gemini-2.5-pro-preview-tts', {
-        waitUntil: 'domcontentloaded'
-      });
-      await humanDelay(2000, 3000);
+      // 1. Konfigurasi Studio AI
+      await setupTtsStudio(page, params, onProgress, chunks.length);
 
-      // Tangani kemungkinan modal popup sambutan / promo Google AI Studio
-      await dismissPopups(page);
-      await humanDelay(500, 1000);
-      await dismissPopups(page);
-
-      // 2. Pilih template
-      onProgress({
-        stage: 'configuring',
-        progress: 22,
-        currentPart: 0,
-        totalParts: chunks.length,
-        message: 'Memilih template suara...'
-      });
-      await dismissPopups(page);
-      console.log('[TtsEngine] Memilih template "The Patient Teacher"...');
-      const templateSelector = 'mat-card[aria-label="The Patient Teacher - A patient and encouraging language teacher."], mat-card[aria-label*="The Patient Teacher"], mat-card:has-text("The Patient Teacher")';
-      await humanClick(page, templateSelector).catch(() => {});
-      await humanDelay(1000, 1600);
-
-      // 3. Switch ke Text Mode
-      onProgress({
-        stage: 'configuring',
-        progress: 25,
-        currentPart: 0,
-        totalParts: chunks.length,
-        message: 'Beralih ke Text Mode & mengatur konteks adegan...'
-      });
-      await dismissPopups(page);
-      console.log('[TtsEngine] Beralih ke Text Mode...');
-      const textTab = page.locator('button:has-text("edit_noteText"), button:has-text("Text"), [aria-label*="Text" i]').first();
-      await textTab.click({ force: true }).catch(() => {});
-      await humanDelay(800, 1400);
-
-      // 4. Paste Contexts
-      await dismissPopups(page);
-      await humanPaste(page, 'textarea[aria-label="Scene"]', scene);
-      await humanDelay(500, 900);
-      await humanPaste(page, 'textarea[aria-label="Sample Context"]', sampleContext);
-      await humanDelay(600, 1000);
-
-      // 5. Atur Voice Settings
-      onProgress({
-        stage: 'configuring',
-        progress: 30,
-        currentPart: 0,
-        totalParts: chunks.length,
-        message: `Mengatur karakter suara (${voice}, ${style}, ${pace}, ${accent})...`
-      });
-      console.log('[TtsEngine] Mengatur karakter suara...');
-      const voiceTrigger = page.locator('button[aria-label="Open voice settings"], button:has-text("Achernar"), button:has-text("Speaker 1"), .speaker-voice-trigger, [aria-label*="voice settings" i], [aria-label*="Voice" i]').first();
-      if (await voiceTrigger.isVisible({ timeout: 4000 }).catch(() => false)) {
-        await voiceTrigger.click({ force: true });
-        await humanDelay(800, 1200);
-
-        // Isi Persona jika tersedia
-        if (persona) {
-          console.log(`[TtsEngine] 📝 Mengisi voice persona...`);
-          const personaSelector = 'textarea[placeholder*="Describe the voice persona" i], textarea[placeholder*="voice persona" i]';
-          const personaField = page.locator(personaSelector).first();
-          if (await personaField.isVisible({ timeout: 2500 }).catch(() => false)) {
-            await humanPaste(page, personaSelector, persona);
-            await humanDelay(400, 700);
-          }
-        }
-
-        // Atur Voice Settings Pill (Style, Pace, Accent) dengan verifikasi postcondition
-        if (style) await selectVoicePill(page, 'Style', style);
-        if (pace) await selectVoicePill(page, 'Pace', pace);
-        if (accent) await selectVoicePill(page, 'Accent', accent);
-
-        // Pilih Voice (prioritaskan pencarian lewat input Search voices)
-        if (voice) {
-          console.log(`[TtsEngine] 👤 Memilih karakter suara: ${voice}...`);
-          const searchInput = page.locator('input[aria-label="Search voices"], input[placeholder*="Search voices" i]').first();
-          if (await searchInput.isVisible({ timeout: 2500 }).catch(() => false)) {
-            await humanPaste(page, 'input[aria-label="Search voices"]', voice.toLowerCase());
-            await humanDelay(400, 700);
-          }
-
-          const voiceCard = page.locator(`button[aria-label="${voice}" i], button[aria-label*="${voice}" i], button:has-text("${voice}"), div.voice-card:has-text("${voice}")`).first();
-          if (await voiceCard.isVisible({ timeout: 3000 }).catch(() => false)) {
-            await voiceCard.scrollIntoViewIfNeeded().catch(() => {});
-            await voiceCard.click({ force: true });
-            await humanDelay(500, 800);
-            console.log(`[TtsEngine] ✓ Suara ${voice} dipilih.`);
-          } else {
-            console.warn(`[TtsEngine] ⚠️ Suara ${voice} tidak ditemukan.`);
-          }
-        }
-
-        // Tutup panel
-        const closeBtn = page.locator('button[aria-label="Close panel"], button[aria-label="Close"], button:has(span:has-text("close"))').first();
-        if (await closeBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-          await closeBtn.click();
-        } else {
-          await page.keyboard.press('Escape').catch(() => {});
-        }
-        await humanDelay(800, 1200);
-      }
-
-      // 6. Loop Eksekusi per Chunk
+      // 2. Loop Eksekusi per Chunk
       const totalChunks = chunks.length;
       const progressChunkSlice = 65 / totalChunks;
 
       for (const chunk of chunks) {
         const chunkBase = 32 + (chunk.index - 1) * progressChunkSlice;
-
-        onProgress({
-          stage: 'rendering',
-          progress: Math.round(chunkBase + progressChunkSlice * 0.1),
-          currentPart: chunk.index,
-          totalParts: totalChunks,
-          message: `Menempelkan naskah bagian ${chunk.index}/${totalChunks} (${chunk.wordCount} kata)...`
-        });
-        console.log(`\n[TtsEngine] 🎬 Memproses Bagian [${chunk.index}/${chunk.total}] (${chunk.wordCount} kata)...`);
-        
-        // 1. Snapshot baseline audio elements dan download buttons sebelum RUN untuk isolasi chunk
-        const baselineAudioSnapshot = await captureAudioElementsSnapshot(page);
-        const baselineBlobUrls = extractBaselineBlobUrls(baselineAudioSnapshot);
-        const baselineDlCount = await page.evaluate(() => {
-          return Array.from(document.querySelectorAll('button')).filter(b => {
-            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
-            const txt = (b.innerText || '').toLowerCase();
-            return aria.includes('download') || txt.includes('download');
-          }).length;
-        }).catch(() => 0);
-        console.log(`[TtsEngine] Audio baseline snapshot: ${baselineAudioSnapshot.length} elements, ${baselineBlobUrls.size} blob URLs detected.`);
-
-        // 2. Paste prompt naskah
-        const promptTextarea = 'textarea[aria-label="Enter a prompt"]';
-        const finalPrompt = formatSpeakerPrompt(chunk.promptText || chunk.text);
-        await humanPaste(page, promptTextarea, finalPrompt);
-        await humanDelay(1500, 2200);
-
-        // Siapkan listener respons jaringan backend Google AI Studio untuk monitoring
-        let apiDone = false;
-        let apiTimestamp = 0;
-        const apiResponsePromise = page.waitForResponse(res => {
-          const u = res.url();
-          return (u.includes('alkalimakersuite') || u.includes('generate-speech') || u.includes('predict')) && res.status() === 200;
-        }, { timeout: 180000 }).catch(() => null);
-        apiResponsePromise.then(res => {
-          if (res) {
-            console.log(`[TtsEngine] 🌐 Backend API TTS respons diterima (${res.status()}).`);
-            apiDone = true;
-            apiTimestamp = Date.now();
-          }
+        const fileData = await renderChunkAudio(page, chunk, {
+          downloadsDir: this.downloadsDir,
+          totalChunks,
+          chunkBase,
+          progressChunkSlice,
+          onProgress
         });
 
-        // 3. Klik RUN
-        onProgress({
-          stage: 'rendering',
-          progress: Math.round(chunkBase + progressChunkSlice * 0.25),
-          currentPart: chunk.index,
-          totalParts: totalChunks,
-          message: `Mengirim perintah render suara bagian ${chunk.index}/${totalChunks} ke Gemini...`
-        });
-        await dismissPopups(page);
-        console.log(`[TtsEngine] ⚡ Klik RUN (Bagian ${chunk.index})...`);
-        const runBtn = 'button:has-text("Run  Ctrl  keyboard_return"), button:has-text("Run"), button.run-button, [aria-label*="Run" i]';
-        await humanClick(page, runBtn);
+        generatedFiles.push(fileData);
 
-        // 4. Tunggu audio selesai dirender berdasarkan bukti nyata (audio blob baru)
-        console.log('[TtsEngine] ⏳ Menunggu Gemini merender audio (memantau status generasi & blob audio baru)...');
-        const genStartTime = Date.now();
-        let lastReportSec = 0;
-        let detectedTargetAudio = null;
-
-        // Beri jeda awal agar render mulai berjalan
-        await humanDelay(1500, 2500);
-
-        while (true) {
-          const elapsedSec = Math.floor((Date.now() - genStartTime) / 1000);
-
-          if (page.isClosed()) {
-            throw new Error(`Target page, context or browser has been closed during rendering of chunk ${chunk.index}`);
-          }
-
-          // Cek status lengkap UI dengan membandingkan terhadap baseline snapshot
-          const baselineUrlsArray = Array.from(baselineBlobUrls);
-          const uiState = await page.evaluate(({ baselineUrls, baselineDlCount }) => {
-            // 1. Cari tombol Run utama (tombol eksekusi di bottom bar, abaikan "Run settings" di panel kanan)
-            const allButtons = Array.from(document.querySelectorAll('button'));
-            const runBtn = allButtons.find(b => {
-              const t = ((b.innerText || '') + ' ' + (b.getAttribute('aria-label') || '')).toLowerCase();
-              if (t.includes('run settings') || b.closest('.run-settings-panel') || b.closest('.model-settings')) return false;
-              return (t.includes('run') && (t.includes('ctrl') || t.includes('keyboard_return') || b.querySelector('mat-icon, .mat-icon') || b.classList.contains('mat-mdc-unelevated-button') || b.classList.contains('mat-primary'))) ||
-                     b.classList.contains('run-button') ||
-                     (t.includes('stop generation') || (t.includes('stop') && !t.includes('play')));
-            });
-
-            // Cek apakah tombol Run sedang menampilkan spinner atau teks Stop (proses generate)
-            let isGenBusy = false;
-            let isRunReady = false;
-            let runHasSpinner = false;
-
-            if (runBtn) {
-              const t = ((runBtn.innerText || '') + ' ' + (runBtn.getAttribute('aria-label') || '')).toLowerCase();
-              const isDisabled = runBtn.disabled || runBtn.hasAttribute('disabled') || runBtn.getAttribute('aria-disabled') === 'true';
-              runHasSpinner = Boolean(runBtn.querySelector('mat-progress-spinner, mat-spinner, .mat-mdc-progress-spinner') || runBtn.parentElement?.querySelector('mat-progress-spinner'));
-              const isStop = t.includes('stop') && !t.includes('play');
-
-              isGenBusy = isStop || runHasSpinner;
-              isRunReady = t.includes('run') && !runHasSpinner && !isStop && !isDisabled;
-            }
-
-            // 2. Cek spinner pada tombol Run
-            const hasSpinner = runHasSpinner;
-
-            // 3. Cek tombol Download pada audio player bar (gunakan selektor standar DOM murni)
-            const dlButtons = Array.from(document.querySelectorAll('button')).filter(b => {
-              const aria = (b.getAttribute('aria-label') || '').toLowerCase();
-              const txt = (b.innerText || '').toLowerCase();
-              const isDl = aria.includes('download') || txt.includes('download');
-              const notDisabled = !b.disabled && !b.hasAttribute('disabled') && b.getAttribute('aria-disabled') !== 'true';
-              return isDl && notDisabled && b.getBoundingClientRect().width > 0;
-            });
-            const hasDownloadBtn = dlButtons.length > 0;
-
-            // 4. Cek elemen audio dan bandingkan blob URL terhadap baseline
-            const audios = Array.from(document.querySelectorAll('audio')).map((a, idx) => ({
-              index: idx,
-              src: a.src || null,
-              currentSrc: a.currentSrc || null,
-              readyState: a.readyState,
-              duration: a.duration
-            }));
-
-            let freshAudio = null;
-            for (let i = audios.length - 1; i >= 0; i--) {
-              const a = audios[i];
-              const s = a.currentSrc || a.src || '';
-              if (s.startsWith('blob:') && !baselineUrls.includes(s)) {
-                freshAudio = a;
-                break;
-              }
-            }
-
-            // Fallback jika baseline benar-benar kosong sejak awal
-            if (!freshAudio && (!baselineUrls || baselineUrls.length === 0)) {
-              freshAudio = audios.filter(a => (a.currentSrc || a.src || '').startsWith('blob:')).pop() || null;
-            }
-
-            // 5. Cek pesan error banner
-            let errorMessage = null;
-            const errorNodes = document.querySelectorAll('mat-snack-bar-container, .error-message, [role="alert"], ms-banner');
-            for (const el of errorNodes) {
-              const txt = el.innerText.trim();
-              if (txt && (txt.includes('403') || txt.includes('400') || txt.includes('500') || txt.toLowerCase().includes('permission denied') || txt.toLowerCase().includes('rate limit') || txt.toLowerCase().includes('no speakers detected'))) {
-                errorMessage = txt.replace(/\s+/g, ' ');
-                break;
-              }
-            }
-
-            return {
-              hasSpinner,
-              isGenBusy,
-              isRunReady,
-              hasDownloadBtn,
-              audioCount: audios.length,
-              freshAudio,
-              isFreshAudioReady: Boolean(freshAudio),
-              errorMessage
-            };
-          }, { baselineUrls: baselineUrlsArray, baselineDlCount }).catch((evalErr) => {
-            console.warn('[TtsEngine] Peringatan evaluasi DOM:', evalErr.message);
-            return {
-              hasSpinner: false,
-              isGenBusy: false,
-              isRunReady: false,
-              hasDownloadBtn: false,
-              audioCount: 0,
-              freshAudio: null,
-              isFreshAudioReady: false,
-              errorMessage: null
-            };
-          });
-
-          // Selesai jika:
-          // a. Fresh audio blob terdeteksi
-          // b. ATAU tombol Run kembali siap ("Run Ctrl"), tidak busy/spinner, dan tombol Download aktif
-          // c. ATAU backend API respons sudah 200 OK dan tombol Run kembali siap
-          const apiSettleSec = apiDone ? Math.floor((Date.now() - apiTimestamp) / 1000) : 0;
-          const isProcessingFinished = (
-            uiState.isFreshAudioReady ||
-            (uiState.isRunReady && !uiState.isGenBusy && uiState.hasDownloadBtn && (apiDone || elapsedSec >= 4)) ||
-            (apiDone && apiSettleSec >= 2 && !uiState.isGenBusy && (uiState.isRunReady || uiState.hasDownloadBtn))
-          ) && !uiState.isGenBusy && elapsedSec >= 3;
-
-          if (isProcessingFinished) {
-            detectedTargetAudio = uiState.freshAudio;
-            console.log(`[TtsEngine] ✓ Proses render audio selesai! (Durasi ${elapsedSec}s)`);
-            if (detectedTargetAudio) {
-              console.log(`[TtsEngine] [TTS] Audio Blob baru terdeteksi: ${detectedTargetAudio.currentSrc || detectedTargetAudio.src} | Durasi: ${detectedTargetAudio.duration || 0}s`);
-            }
-            break;
-          }
-
-          // KONDISI 3 (ERROR FATAL): Hanya lempar error jika TIDAK ADA audio yang berhasil terbuat setelah spinner berhenti
-          if (uiState.errorMessage && !uiState.hasSpinner && !uiState.isFreshAudioReady && elapsedSec >= 6) {
-            throw new Error(`[Google AI Studio Rejection]: "${uiState.errorMessage}". Silakan periksa format naskah atau kuota harian akun Google.`);
-          }
-
-          if (elapsedSec - lastReportSec >= 4) {
-            lastReportSec = elapsedSec;
-            console.log(`   ⏳ (${elapsedSec}s) Spinner: ${uiState.hasSpinner} | GenBusy: ${uiState.isGenBusy} | RunReady: ${uiState.isRunReady} | FreshAudio: ${uiState.isFreshAudioReady} | HasDL: ${uiState.hasDownloadBtn} | ApiDone: ${apiDone}`);
-            onProgress({
-              stage: 'rendering',
-              progress: Math.min(Math.round(chunkBase + progressChunkSlice * 0.65), 92),
-              currentPart: chunk.index,
-              totalParts: totalChunks,
-              message: `Gemini sedang merender suara bagian ${chunk.index}/${totalChunks} (${elapsedSec}s)...`
-            });
-          }
-
-          if (elapsedSec > 180) {
-            throw new Error(`[TtsEngine] ⚠️ Batas waktu render audio tercapai (${elapsedSec}s). Audio tidak berhasil digenerate oleh Gemini.`);
-          }
-
-          await new Promise(r => setTimeout(r, 800));
-        }
-
-        // Tunggu respons API jika belum selesai
-        await Promise.race([
-          apiResponsePromise,
-          new Promise(r => setTimeout(r, 3000))
-        ]);
-
-        console.log(`[TtsEngine] ✓ Selesai generate bagian ${chunk.index}!`);
-
-        // 5. Akuisisi audio langsung via Direct DOM Blob Extraction (tanpa perlu klik Download)
         onProgress({
           stage: 'downloading',
-          progress: Math.round(chunkBase + progressChunkSlice * 0.8),
+          progress: Math.round(chunkBase + progressChunkSlice),
           currentPart: chunk.index,
           totalParts: totalChunks,
-          message: `Mengunduh berkas audio bagian ${chunk.index}/${totalChunks}...`
+          message: `Berkas audio bagian ${chunk.index}/${totalChunks} berhasil disimpan (${fileData.sizeKb} KB).`
         });
-        console.log(`[TtsEngine] ⬇️ Mengakuisisi berkas audio bagian ${chunk.index}...`);
 
-        const downloadStartTime = Date.now();
-        const filename = `gemini_tts_${downloadStartTime}_part${chunk.index}.wav`;
-        const detectedBlobSrc = detectedTargetAudio ? (detectedTargetAudio.currentSrc || detectedTargetAudio.src) : null;
-
-        const downloadResult = await downloadWithRetry({
-          page,
-          downloadDir: this.downloadsDir,
-          customFilename: filename,
-          timeout: 25000,
-          baselineSnapshot: baselineAudioSnapshot,
-          targetBlobSrc: detectedBlobSrc,
-          trigger: async () => {
-            if (page.isClosed()) return;
-            const downloadBtn = page.locator('button[aria-label="Download"], button[aria-label*="Download" i], button:has-text("Download")').last();
-            if (await downloadBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-              await downloadBtn.scrollIntoViewIfNeeded().catch(() => {});
-              await downloadBtn.click({ force: true });
-            }
-          }
-        }, 1);
-
-        const downloadedPath = downloadResult.path;
-
-        if (downloadedPath && fs.existsSync(downloadedPath)) {
-          const stats = fs.statSync(downloadedPath);
-          console.log(`[TtsEngine] 🎉 File tersimpan: ${filename} (${(stats.size / 1024).toFixed(1)} KB) [${downloadResult.strategy}]`);
-          generatedFiles.push({
-            partIndex: chunk.index,
-            totalParts: chunk.total,
-            filename: filename,
-            filePath: downloadedPath,
-            downloadUrl: `/api/tts/download/${filename}`,
-            sizeBytes: stats.size,
-            sizeKb: (stats.size / 1024).toFixed(1),
-            strategy: downloadResult.strategy,
-            textSnippet: chunk.text.slice(0, 80) + (chunk.text.length > 80 ? '...' : ''),
-            wordCount: chunk.wordCount
-          });
-
-          onProgress({
-            stage: 'downloading',
-            progress: Math.round(chunkBase + progressChunkSlice),
-            currentPart: chunk.index,
-            totalParts: totalChunks,
-            message: `Berkas audio bagian ${chunk.index}/${totalChunks} berhasil disimpan (${(stats.size / 1024).toFixed(1)} KB).`
-          });
-        } else {
-          console.error(`[TtsEngine] ❌ File audio bagian ${chunk.index} tidak berhasil diunduh.`);
-          const debugImg = path.join(this.downloadsDir, `debug_download_failed_part${chunk.index}_${Date.now()}.png`);
-          await page.screenshot({ path: debugImg, fullPage: true }).catch(() => {});
-          throw new Error(`File audio bagian ${chunk.index} gagal diunduh. Screenshot debug disimpan di ${path.basename(debugImg)}`);
-        }
-
-        // Jeda antar bagian naskah jika ada beberapa chunk
         if (chunk.index < chunk.total) {
-          console.log(`[TtsEngine] ⏳ Jeda natural sebelum bagian berikutnya...`);
+          console.log('[TtsEngine] Jeda natural sebelum bagian berikutnya...');
           await humanDelay(2500, 4000);
         }
       }
 
-      console.log(`\n================================================================`);
-      console.log(`🎉 [TtsEngine] Semua ${generatedFiles.length} bagian berhasil dibuat!`);
-      console.log(`================================================================\n`);
+      console.log('\n================================================================');
+      console.log(`[TtsEngine] Semua ${generatedFiles.length} bagian berhasil dibuat!`);
+      console.log('================================================================\n');
 
       onProgress({
         stage: 'completed',
@@ -759,13 +130,15 @@ class TtsEngine {
         message: `Semua ${generatedFiles.length} bagian audio berhasil dibuat dan siap diunduh.`
       });
 
-      // Selesai: Browser dibiarkan terbuka jika keepOpen aktif
-      await humanDelay(2000, 3000);
-      const shouldKeepOpen = params.keepOpen || process.env.KEEP_BROWSER_OPEN === 'true';
+      // Selesai: Beri jeda 30 detik sebelum menutup browser sesuai permintaan
+      const shouldKeepOpen = process.env.KEEP_BROWSER_OPEN === 'true' || params.keepOpen === true;
       if (!shouldKeepOpen) {
+        console.log('[TtsEngine] Menunggu 30 detik sebelum menutup browser Chrome...');
+        await new Promise(r => setTimeout(r, 30000));
         await context.close().catch(() => {});
+        console.log('[TtsEngine] Browser Chrome berhasil ditutup.');
       } else {
-        console.log('[TtsEngine] 🟢 Browser Chrome tetap dibiarkan terbuka di layar.');
+        console.log('[TtsEngine] Browser Chrome dibiarkan terbuka (KEEP_BROWSER_OPEN aktif).');
       }
 
       return {
@@ -777,22 +150,17 @@ class TtsEngine {
       };
 
     } catch (error) {
-      console.error('[TtsEngine] ❌ Terjadi kesalahan:', error.message);
-      // Simpan screenshot error agar user dan developer dapat memeriksa kondisi UI
+      console.error('[TtsEngine] Terjadi kesalahan:', error.message);
       try {
         const errorScreenshot = path.join(this.downloadsDir, `error_screenshot_${Date.now()}.png`);
         await page.screenshot({ path: errorScreenshot, fullPage: true }).catch(() => {});
-        console.log(`[TtsEngine] 📸 Screenshot kesalahan telah disimpan ke: ${errorScreenshot}`);
+        console.log(`[TtsEngine] Screenshot kesalahan telah disimpan ke: ${errorScreenshot}`);
       } catch (sErr) {}
 
-      // Jangan tutup browser mendadak agar pengguna bisa melihat tampilan di layar
       const shouldKeepOpen = params.keepOpen || process.env.KEEP_BROWSER_OPEN === 'true';
       if (!shouldKeepOpen) {
-        console.log('[TtsEngine] Menunggu 8 detik sebelum menutup browser agar Anda dapat melihat tampilan...');
-        await humanDelay(8000, 10000);
+        await humanDelay(3000, 4000);
         await context.close().catch(() => {});
-      } else {
-        console.log('[TtsEngine] 🟢 Browser Chrome dibiarkan terbuka untuk pemeriksaan.');
       }
       throw error;
     }
@@ -805,5 +173,6 @@ module.exports = {
   formatSpeakerPrompt,
   normalizePillValue,
   isPillValueMatching,
-  selectVoicePill
+  selectVoicePill,
+  dismissPopups
 };

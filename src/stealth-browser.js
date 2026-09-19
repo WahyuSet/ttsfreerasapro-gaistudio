@@ -57,6 +57,7 @@ async function launchStealthChrome(options = {}) {
     headless,
     viewport,
     acceptDownloads: true,
+    downloadsPath: options.downloadsPath || path.resolve(__dirname, '..', 'downloads'),
     ignoreDefaultArgs: ['--enable-automation'],
     args: defaultArgs
   };
