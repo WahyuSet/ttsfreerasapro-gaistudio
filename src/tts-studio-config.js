@@ -1,6 +1,32 @@
 const { humanClick, humanPaste, humanDelay } = require('./human-behavior');
 const { dismissPopups, selectVoicePill } = require('./tts-ui-helpers');
 
+const VOICE_ALIASES = {
+  'zhepyr': 'Zephyr',
+  'zepir': 'Zephyr',
+  'zephir': 'Zephyr',
+};
+
+const OFFICIAL_VOICES = [
+  'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda', 'Orus', 'Zephyr', 'Aoede',
+  'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba',
+  'Despina', 'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia', 'Achernar',
+  'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird', 'Zubenelgenubi',
+  'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat', 'Capella', 'Enif'
+];
+
+function normalizeVoiceName(name) {
+  if (!name || typeof name !== 'string') return name;
+  const trimmed = name.trim();
+  const lower = trimmed.toLowerCase();
+  if (VOICE_ALIASES[lower]) {
+    console.log(`[TtsEngine] Normalisasi nama suara: "${name}" -> "${VOICE_ALIASES[lower]}"`);
+    return VOICE_ALIASES[lower];
+  }
+  const matched = OFFICIAL_VOICES.find((v) => v.toLowerCase() === lower);
+  return matched || trimmed;
+}
+
 /**
  * Konfigurasi lingkungan Studio Google AI TTS sebelum perenderan audio dimulai.
  * @param {import('playwright').Page} page
@@ -18,6 +44,8 @@ async function setupTtsStudio(page, params, onProgress, totalChunks) {
     sampleContext = 'Warm, encouraging, speaking like an older sibling sharing cool trivia, upbeat yet gentle pacing.',
     persona = 'A relaxed and engaging storyteller, talking like a close friend sharing cool trivia, upbeat and lighthearted.'
   } = params;
+
+  const targetVoice = normalizeVoiceName(voice);
 
   // 1. Buka AI Studio TTS
   onProgress({
@@ -104,22 +132,22 @@ async function setupTtsStudio(page, params, onProgress, totalChunks) {
     if (accent) await selectVoicePill(page, 'Accent', accent);
 
     // Pilih Voice (prioritaskan pencarian lewat input Search voices)
-    if (voice) {
-      console.log(`[TtsEngine] Memilih karakter suara: ${voice}...`);
+    if (targetVoice) {
+      console.log(`[TtsEngine] Memilih karakter suara: ${targetVoice}...`);
       const searchInput = page.locator('input[aria-label="Search voices"], input[placeholder*="Search voices" i]').first();
       if (await searchInput.isVisible({ timeout: 2500 }).catch(() => false)) {
-        await humanPaste(page, 'input[aria-label="Search voices"]', voice.toLowerCase());
+        await humanPaste(page, 'input[aria-label="Search voices"]', targetVoice.toLowerCase());
         await humanDelay(400, 700);
       }
 
-      const voiceCard = page.locator(`button[aria-label="${voice}" i], button[aria-label*="${voice}" i], button:has-text("${voice}"), div.voice-card:has-text("${voice}")`).first();
+      const voiceCard = page.locator(`button[aria-label="${targetVoice}" i], button[aria-label*="${targetVoice}" i], button:has-text("${targetVoice}"), div.voice-card:has-text("${targetVoice}")`).first();
       if (await voiceCard.isVisible({ timeout: 3000 }).catch(() => false)) {
         await voiceCard.scrollIntoViewIfNeeded().catch(() => {});
         await voiceCard.click({ force: true });
         await humanDelay(500, 800);
-        console.log(`[TtsEngine] Suara ${voice} dipilih.`);
+        console.log(`[TtsEngine] Suara ${targetVoice} dipilih.`);
       } else {
-        console.warn(`[TtsEngine] Suara ${voice} tidak ditemukan.`);
+        console.warn(`[TtsEngine] Suara ${targetVoice} tidak ditemukan.`);
       }
     }
 

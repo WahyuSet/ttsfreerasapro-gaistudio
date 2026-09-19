@@ -67,10 +67,10 @@ async function main() {
   }
 
   // 2. Kirim Job TTS ke POST /api/tts/jobs
-  // Parameter sesuai yang diminta user: Style: smile / Vocal Smile, Pace: Natural, Accent: Neutral, Voice: Achernar
+  // Parameter sesuai yang diminta user: Style: smile / Vocal Smile, Pace: Natural, Accent: Neutral, Voice: Zephyr
   const testPayload = {
-    text: 'Halo semuanya!, ini adalah jamu biji.',
-    voice: 'Achernar',
+    text: 'Halo semuanya!, ini adalah pengujian suara Zephyr di Google AI Studio TTS.',
+    voice: 'Zephyr',
     style: 'Vocal Smile',
     pace: 'Natural',
     accent: 'Neutral',
