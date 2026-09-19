@@ -118,7 +118,9 @@ class JobManager extends EventEmitter {
         sampleContext: params.sampleContext || 'Warm, encouraging, speaking like an older sibling sharing cool trivia, upbeat yet gentle pacing.',
         persona: params.persona || 'A relaxed and engaging storyteller, talking like a close friend sharing cool trivia, upbeat and lighthearted.',
         autoChunk: params.autoChunk !== false,
-        maxWordsPerChunk: Number(params.maxWordsPerChunk) || 300
+        maxWordsPerChunk: Number(params.maxWordsPerChunk) || 300,
+        keepOpen: params.keepOpen === true,
+        headless: params.headless === true
       },
       result: null,
       error: null,

@@ -467,7 +467,11 @@ class TtsEngine {
         const baselineAudioSnapshot = await captureAudioElementsSnapshot(page);
         const baselineBlobUrls = extractBaselineBlobUrls(baselineAudioSnapshot);
         const baselineDlCount = await page.evaluate(() => {
-          return document.querySelectorAll('button[aria-label="Download"], button[aria-label*="Download" i], button:has-text("Download")').length;
+          return Array.from(document.querySelectorAll('button')).filter(b => {
+            const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+            const txt = (b.innerText || '').toLowerCase();
+            return aria.includes('download') || txt.includes('download');
+          }).length;
         }).catch(() => 0);
         console.log(`[TtsEngine] Audio baseline snapshot: ${baselineAudioSnapshot.length} elements, ${baselineBlobUrls.size} blob URLs detected.`);
 
@@ -524,38 +528,43 @@ class TtsEngine {
           // Cek status lengkap UI dengan membandingkan terhadap baseline snapshot
           const baselineUrlsArray = Array.from(baselineBlobUrls);
           const uiState = await page.evaluate(({ baselineUrls, baselineDlCount }) => {
-            // 1. Cek apakah ada spinner aktif (abaikan elemen seekbar atau slider audio player)
-            const spinners = document.querySelectorAll('mat-progress-spinner, mat-spinner, .mat-mdc-progress-spinner');
-            const hasSpinner = Array.from(spinners).some(s => {
-              if (s.closest('mat-slider') || s.getAttribute('role') === 'slider' || s.closest('.audio-player')) return false;
-              const rect = s.getBoundingClientRect();
-              return rect.width > 0 && rect.height > 0;
-            });
-
-            // 2. Cek status tombol Run/Stop generasi utama (BUKAN tombol kontrol audio player playback!)
-            const runButtons = Array.from(document.querySelectorAll('button')).filter(b => {
+            // 1. Cari tombol Run utama (tombol eksekusi di bottom bar, abaikan "Run settings" di panel kanan)
+            const allButtons = Array.from(document.querySelectorAll('button'));
+            const runBtn = allButtons.find(b => {
               const t = ((b.innerText || '') + ' ' + (b.getAttribute('aria-label') || '')).toLowerCase();
-              return (t.includes('run') && (t.includes('ctrl') || b.classList.contains('mat-mdc-unelevated-button') || b.classList.contains('mat-primary'))) ||
-                     t.includes('stop generation') ||
-                     b.classList.contains('run-button');
+              if (t.includes('run settings') || b.closest('.run-settings-panel') || b.closest('.model-settings')) return false;
+              return (t.includes('run') && (t.includes('ctrl') || t.includes('keyboard_return') || b.querySelector('mat-icon, .mat-icon') || b.classList.contains('mat-mdc-unelevated-button') || b.classList.contains('mat-primary'))) ||
+                     b.classList.contains('run-button') ||
+                     (t.includes('stop generation') || (t.includes('stop') && !t.includes('play')));
             });
 
+            // Cek apakah tombol Run sedang menampilkan spinner atau teks Stop (proses generate)
             let isGenBusy = false;
             let isRunReady = false;
-            if (runButtons.length > 0) {
-              const b = runButtons[0];
-              const t = ((b.innerText || '') + ' ' + (b.getAttribute('aria-label') || '')).toLowerCase();
-              const notDisabled = !b.disabled && !b.hasAttribute('disabled') && b.getAttribute('aria-disabled') !== 'true';
-              isGenBusy = t.includes('stop') && !t.includes('play');
-              isRunReady = (t.includes('run') || t.includes('ctrl')) && notDisabled;
+            let runHasSpinner = false;
+
+            if (runBtn) {
+              const t = ((runBtn.innerText || '') + ' ' + (runBtn.getAttribute('aria-label') || '')).toLowerCase();
+              const isDisabled = runBtn.disabled || runBtn.hasAttribute('disabled') || runBtn.getAttribute('aria-disabled') === 'true';
+              runHasSpinner = Boolean(runBtn.querySelector('mat-progress-spinner, mat-spinner, .mat-mdc-progress-spinner') || runBtn.parentElement?.querySelector('mat-progress-spinner'));
+              const isStop = t.includes('stop') && !t.includes('play');
+
+              isGenBusy = isStop || runHasSpinner;
+              isRunReady = t.includes('run') && !runHasSpinner && !isStop && !isDisabled;
             }
 
-            // 3. Cek tombol Download yang terpasang
-            const dlButtons = Array.from(document.querySelectorAll('button[aria-label="Download"], button[aria-label*="Download" i], button:has-text("Download")')).filter(b => {
+            // 2. Cek spinner pada tombol Run
+            const hasSpinner = runHasSpinner;
+
+            // 3. Cek tombol Download pada audio player bar (gunakan selektor standar DOM murni)
+            const dlButtons = Array.from(document.querySelectorAll('button')).filter(b => {
+              const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+              const txt = (b.innerText || '').toLowerCase();
+              const isDl = aria.includes('download') || txt.includes('download');
               const notDisabled = !b.disabled && !b.hasAttribute('disabled') && b.getAttribute('aria-disabled') !== 'true';
-              return b.getBoundingClientRect().width > 0 && notDisabled;
+              return isDl && notDisabled && b.getBoundingClientRect().width > 0;
             });
-            const hasNewDownloadButton = dlButtons.length > baselineDlCount;
+            const hasDownloadBtn = dlButtons.length > 0;
 
             // 4. Cek elemen audio dan bandingkan blob URL terhadap baseline
             const audios = Array.from(document.querySelectorAll('audio')).map((a, idx) => ({
@@ -570,7 +579,7 @@ class TtsEngine {
             for (let i = audios.length - 1; i >= 0; i--) {
               const a = audios[i];
               const s = a.currentSrc || a.src || '';
-              if (s.startsWith('blob:') && !baselineUrls.includes(s) && a.readyState >= 1) {
+              if (s.startsWith('blob:') && !baselineUrls.includes(s)) {
                 freshAudio = a;
                 break;
               }
@@ -578,7 +587,7 @@ class TtsEngine {
 
             // Fallback jika baseline benar-benar kosong sejak awal
             if (!freshAudio && (!baselineUrls || baselineUrls.length === 0)) {
-              freshAudio = audios.filter(a => (a.currentSrc || a.src || '').startsWith('blob:') && a.readyState >= 1).pop() || null;
+              freshAudio = audios.filter(a => (a.currentSrc || a.src || '').startsWith('blob:')).pop() || null;
             }
 
             // 5. Cek pesan error banner
@@ -596,34 +605,35 @@ class TtsEngine {
               hasSpinner,
               isGenBusy,
               isRunReady,
-              hasNewDownloadButton,
+              hasDownloadBtn,
               audioCount: audios.length,
               freshAudio,
               isFreshAudioReady: Boolean(freshAudio),
               errorMessage
             };
-          }, { baselineUrls: baselineUrlsArray, baselineDlCount }).catch(() => ({
-            hasSpinner: true,
-            isGenBusy: false,
-            isRunReady: false,
-            hasNewDownloadButton: false,
-            audioCount: 0,
-            freshAudio: null,
-            isFreshAudioReady: false,
-            errorMessage: null
-          }));
+          }, { baselineUrls: baselineUrlsArray, baselineDlCount }).catch((evalErr) => {
+            console.warn('[TtsEngine] Peringatan evaluasi DOM:', evalErr.message);
+            return {
+              hasSpinner: false,
+              isGenBusy: false,
+              isRunReady: false,
+              hasDownloadBtn: false,
+              audioCount: 0,
+              freshAudio: null,
+              isFreshAudioReady: false,
+              errorMessage: null
+            };
+          });
 
           // Selesai jika:
           // a. Fresh audio blob terdeteksi
-          // b. Tombol download baru terpasang
-          // c. Backend API respons sudah 200 OK dan settle 2+ detik tanpa genBusy
-          // d. Run button kembali siap (not disabled) dan sudah lewat 4+ detik
+          // b. ATAU tombol Run kembali siap ("Run Ctrl"), tidak busy/spinner, dan tombol Download aktif
+          // c. ATAU backend API respons sudah 200 OK dan tombol Run kembali siap
           const apiSettleSec = apiDone ? Math.floor((Date.now() - apiTimestamp) / 1000) : 0;
           const isProcessingFinished = (
             uiState.isFreshAudioReady ||
-            uiState.hasNewDownloadButton ||
-            (apiDone && apiSettleSec >= 2 && !uiState.isGenBusy) ||
-            (uiState.isRunReady && !uiState.isGenBusy && elapsedSec >= 4 && (uiState.audioCount > 0 || apiDone))
+            (uiState.isRunReady && !uiState.isGenBusy && uiState.hasDownloadBtn && (apiDone || elapsedSec >= 4)) ||
+            (apiDone && apiSettleSec >= 2 && !uiState.isGenBusy && (uiState.isRunReady || uiState.hasDownloadBtn))
           ) && !uiState.isGenBusy && elapsedSec >= 3;
 
           if (isProcessingFinished) {
@@ -642,7 +652,7 @@ class TtsEngine {
 
           if (elapsedSec - lastReportSec >= 4) {
             lastReportSec = elapsedSec;
-            console.log(`   ⏳ (${elapsedSec}s) Spinner: ${uiState.hasSpinner} | GenBusy: ${uiState.isGenBusy} | RunReady: ${uiState.isRunReady} | FreshAudio: ${uiState.isFreshAudioReady} | NewDL: ${uiState.hasNewDownloadButton} | ApiDone: ${apiDone}`);
+            console.log(`   ⏳ (${elapsedSec}s) Spinner: ${uiState.hasSpinner} | GenBusy: ${uiState.isGenBusy} | RunReady: ${uiState.isRunReady} | FreshAudio: ${uiState.isFreshAudioReady} | HasDL: ${uiState.hasDownloadBtn} | ApiDone: ${apiDone}`);
             onProgress({
               stage: 'rendering',
               progress: Math.min(Math.round(chunkBase + progressChunkSlice * 0.65), 92),
