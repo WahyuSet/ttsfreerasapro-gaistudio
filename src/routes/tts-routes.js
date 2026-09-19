@@ -154,16 +154,16 @@ function createTtsRouter({ jobManager, ttsEngine, getBaseUrl }) {
   router.get('/voices', (req, res) => {
     res.json({
       success: true,
-      defaultVoice: 'Achernar',
+      defaultVoice: 'Zephyr',
       voices: [
-        { name: 'Achernar', gender: 'Female', description: 'Warm, clear, natural, relatable' },
-        { name: 'Algenib', gender: 'Male', description: 'Calm, authoritative, professional' },
-        { name: 'Aoede', gender: 'Female', description: 'Energetic, cheerful, bright' },
-        { name: 'Capella', gender: 'Female', description: 'Articulate, presenter, informative' },
-        { name: 'Enif', gender: 'Male', description: 'Deep, resonant, dramatic' },
-        { name: 'Kore', gender: 'Female', description: 'Friendly, gentle, conversational' },
-        { name: 'Puck', gender: 'Male', description: 'Playful, dynamic, expressive' },
-        { name: 'Schedar', gender: 'Male', description: 'Narrative, engaging storyteller' }
+        { name: 'Zephyr', gender: 'Dynamic', isDefault: true, description: 'Calm, smooth, versatile, and balanced (Default)' },
+        { name: 'Charon', gender: 'Male', isDefault: false, description: 'Deep, authoritative, and steady' },
+        { name: 'Achird', gender: 'Female', isDefault: false, description: 'Gentle, thoughtful, and clear' },
+        { name: 'Fenrir', gender: 'Male', isDefault: false, description: 'Energetic, bold, and powerful' },
+        { name: 'Iapetus', gender: 'Male', isDefault: false, description: 'Warm, conversational, and approachable' },
+        { name: 'Orus', gender: 'Male', isDefault: false, description: 'Resonant, crisp, and confident' },
+        { name: 'Rasalgethi', gender: 'Male', isDefault: false, description: 'Informative, rich storyteller' },
+        { name: 'Achernar', gender: 'Female', isDefault: false, description: 'Warm, clear, natural, and relatable' }
       ],
       styles: ['Vocal Smile', 'Natural', 'Whisper', 'Cheer', 'Serious', 'Empathetic'],
       paces: ['Very Slow', 'Slow', 'Natural', 'Fast', 'Very Fast'],

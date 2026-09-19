@@ -100,7 +100,7 @@ x-api-key: IkPzTzClQrVGj73OMWIm7TPkRTHnlj7M
 | Parameter | Tipe Data | Wajib? | Default | Keterangan |
 | :--- | :--- | :--- | :--- | :--- |
 | `text` | `string` | **Ya** | - | Naskah suara yang akan dibaca. |
-| `voice` | `string` | Opsional | `"Achernar"` | Nama karakter suara (pilihan: `Achernar`, `Algenib`, `Aoede`, `Capella`, `Enif`, `Kore`, `Puck`, `Schedar`). |
+| `voice` | `string` | Opsional | `"Zephyr"` | Nama karakter suara (pilihan: `Zephyr` [default], `Charon`, `Achird`, `Fenrir`, `Iapetus`, `Orus`, `Rasalgethi`, `Achernar`, dll.). |
 | `style` | `string` | Opsional | `"Vocal Smile"` | Gaya bicara (`Vocal Smile`, `Natural`, `Whisper`, `Cheer`, `Serious`, `Empathetic`). |
 | `pace` | `string` | Opsional | `"Natural"` | Kecepatan (`Very Slow`, `Slow`, `Natural`, `Fast`, `Very Fast`). |
 | `accent` | `string` | Opsional | `"Neutral"` | Aksen pembawaan (`Neutral`, `American`, `British`, `Australian`, `Indian`). |
@@ -117,7 +117,7 @@ x-api-key: IkPzTzClQrVGj73OMWIm7TPkRTHnlj7M
 ```json
 {
   "text": "Halo semuanya! Selamat datang di channel kita. Hari ini kita akan menjelajahi misteri terdalam samudera bumi.",
-  "voice": "Achernar",
+  "voice": "Zephyr",
   "style": "Vocal Smile",
   "pace": "Natural",
   "accent": "Neutral"

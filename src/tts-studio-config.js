@@ -36,7 +36,7 @@ function normalizeVoiceName(name) {
  */
 async function setupTtsStudio(page, params, onProgress, totalChunks) {
   const {
-    voice = 'Achernar',
+    voice = 'Zephyr',
     style = 'Vocal Smile',
     pace = 'Natural',
     accent = 'Neutral',
@@ -110,7 +110,7 @@ async function setupTtsStudio(page, params, onProgress, totalChunks) {
     message: `Mengatur karakter suara (${voice}, ${style}, ${pace}, ${accent})...`
   });
   console.log('[TtsEngine] Mengatur karakter suara...');
-  const voiceTrigger = page.locator('button[aria-label="Open voice settings"], button:has-text("Achernar"), button:has-text("Speaker 1"), .speaker-voice-trigger, [aria-label*="voice settings" i], [aria-label*="Voice" i]').first();
+  const voiceTrigger = page.locator('button[aria-label="Open voice settings"], button:has-text("Zephyr"), button:has-text("Achernar"), button:has-text("Speaker 1"), .speaker-voice-trigger, [aria-label*="voice settings" i], [aria-label*="Voice" i]').first();
   if (await voiceTrigger.isVisible({ timeout: 4000 }).catch(() => false)) {
     await voiceTrigger.click({ force: true });
     await humanDelay(800, 1200);
@@ -163,5 +163,7 @@ async function setupTtsStudio(page, params, onProgress, totalChunks) {
 }
 
 module.exports = {
-  setupTtsStudio
+  setupTtsStudio,
+  normalizeVoiceName,
+  OFFICIAL_VOICES
 };

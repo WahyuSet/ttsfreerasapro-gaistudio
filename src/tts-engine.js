@@ -40,7 +40,7 @@ class TtsEngine {
   async _executeJob(params, onProgress = () => {}) {
     const {
       text,
-      voice = 'Achernar',
+      voice = 'Zephyr',
       style = 'Vocal Smile',
       pace = 'Natural',
       accent = 'Neutral',

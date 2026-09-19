@@ -61,7 +61,7 @@ class JobManager extends EventEmitter {
         text: params.text.trim(),
         textLength: params.text.trim().length,
         wordCount: params.text.trim().split(/\s+/).length,
-        voice: params.voice || 'Achernar',
+        voice: params.voice || 'Zephyr',
         style: params.style || 'Vocal Smile',
         pace: params.pace || 'Natural',
         accent: params.accent || 'Neutral',
