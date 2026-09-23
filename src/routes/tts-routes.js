@@ -263,9 +263,18 @@ function createTtsRouter({ jobManager, ttsEngine, getBaseUrl }) {
         { name: 'Rasalgethi', gender: 'Male', isDefault: false, description: 'Informative, rich storyteller' },
         { name: 'Achernar', gender: 'Female', isDefault: false, description: 'Warm, clear, natural, and relatable' }
       ],
-      styles: ['Vocal Smile', 'Natural', 'Whisper', 'Cheer', 'Serious', 'Empathetic'],
-      paces: ['Very Slow', 'Slow', 'Natural', 'Fast', 'Very Fast'],
-      accents: ['Neutral', 'American', 'British', 'Australian', 'Indian']
+      styles: ['Vocal Smile', 'Newscaster', 'Whisper', 'Empathetic', 'Promo/Hype', 'Deadpan'],
+      paces: ['Natural', 'Rapid Fire', 'The Drift', 'Staccato'],
+      accents: [
+        'Neutral',
+        'American (Gen)',
+        'American (Valley)',
+        'American (South)',
+        'British (RP)',
+        'British (Brixton)',
+        'Transatlantic',
+        'Australian'
+      ]
     });
   });
 
