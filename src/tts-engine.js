@@ -45,7 +45,8 @@ class TtsEngine {
       pace = 'Natural',
       accent = 'Neutral',
       autoChunk = true,
-      maxWordsPerChunk = 300
+      maxWordsPerChunk = 300,
+      offscreen = true
     } = params;
 
     if (!text || typeof text !== 'string' || !text.trim()) {
@@ -76,7 +77,7 @@ class TtsEngine {
     const { context } = await launchStealthChrome({
       userDataDir: this.profilesDir,
       headless: false,
-      offscreen: true
+      offscreen: Boolean(offscreen)
     });
 
     const page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();

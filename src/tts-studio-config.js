@@ -24,7 +24,15 @@ function normalizeVoiceName(name) {
     return VOICE_ALIASES[lower];
   }
   const matched = OFFICIAL_VOICES.find((v) => v.toLowerCase() === lower);
-  return matched || trimmed;
+  if (matched) return matched;
+
+  const prefixMatch = OFFICIAL_VOICES.find((v) => lower.startsWith(v.toLowerCase()));
+  if (prefixMatch) return prefixMatch;
+
+  const containedMatch = OFFICIAL_VOICES.find((v) => lower.includes(v.toLowerCase()));
+  if (containedMatch) return containedMatch;
+
+  return trimmed;
 }
 
 const HARDCODED_SCENE = 'A modern study room, explaining everyday science concepts to curious peers.';
@@ -80,8 +88,8 @@ async function setupTtsStudio(page, params, onProgress, totalChunks) {
     message: 'Memilih template suara...'
   });
   await dismissPopups(page);
-  console.log('[TtsEngine] Memilih template "The Patient Teacher"...');
-  const templateSelector = 'mat-card[aria-label="The Patient Teacher - A patient and encouraging language teacher."], mat-card[aria-label*="The Patient Teacher"], mat-card:has-text("The Patient Teacher")';
+  console.log('[TtsEngine] Memilih template "The Master Storyteller"...');
+  const templateSelector = 'mat-card[aria-label*="The Master Storyteller"], mat-card:has-text("The Master Storyteller"), [aria-label*="The Master Storyteller" i], mat-card[aria-label*="The Patient Teacher"], mat-card:has-text("The Patient Teacher")';
   await humanClick(page, templateSelector).catch(() => {});
   await humanDelay(1000, 1600);
 

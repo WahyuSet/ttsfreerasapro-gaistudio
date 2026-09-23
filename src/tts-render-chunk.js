@@ -43,6 +43,16 @@ async function renderChunkAudio(page, chunk, options) {
   // Siapkan listener respons jaringan backend Google AI Studio
   let apiDone = false;
   let apiTimestamp = 0;
+  page.on('response', async res => {
+    try {
+      const u = res.url();
+      if (res.status() >= 400 && (u.includes('alkalimakersuite') || u.includes('generate-speech') || u.includes('predict') || u.includes('googleapis'))) {
+        const body = await res.text().catch(() => '');
+        console.error(`\n[TtsEngine] ❌ Google API Error ${res.status()}: ${body.slice(0, 500)}\n`);
+      }
+    } catch {}
+  });
+
   const apiResponsePromise = page.waitForResponse(res => {
     const u = res.url();
     return (u.includes('alkalimakersuite') || u.includes('generate-speech') || u.includes('predict')) && res.status() === 200;

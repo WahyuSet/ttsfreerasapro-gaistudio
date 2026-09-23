@@ -8,13 +8,13 @@
  * @param {string} defaultSpeaker
  * @returns {string}
  */
-function formatSpeakerPrompt(text, defaultSpeaker = 'Speaker 1') {
+function formatSpeakerPrompt(text) {
   if (!text || typeof text !== 'string') return '';
-  const trimmed = text.trim();
-  if (/^speaker\s*\d+\s*:/i.test(trimmed)) {
-    return trimmed;
-  }
-  return `${defaultSpeaker} : ${trimmed}`;
+  return text
+    .replace(/\r\n|\r|\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^speaker\s*\d+\s*:\s*/i, '');
 }
 
 /**
@@ -25,15 +25,12 @@ function formatSpeakerPrompt(text, defaultSpeaker = 'Speaker 1') {
  */
 function splitTextIntoChunks(text, maxWords = 300) {
   if (!text || typeof text !== 'string') return [];
-  let cleanText = text.trim();
+  let cleanText = text
+    .replace(/\r\n|\r|\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^(speaker\s*\d+)\s*:\s*/i, '');
   if (!cleanText) return [];
-
-  let speakerPrefix = 'Speaker 1';
-  const match = cleanText.match(/^(speaker\s*\d+)\s*:\s*/i);
-  if (match) {
-    speakerPrefix = match[1];
-    cleanText = cleanText.slice(match[0].length).trim();
-  }
 
   const words = cleanText.split(/\s+/);
   if (words.length <= maxWords) {
@@ -41,7 +38,7 @@ function splitTextIntoChunks(text, maxWords = 300) {
       index: 1,
       total: 1,
       text: cleanText,
-      promptText: `${speakerPrefix} : ${cleanText}`,
+      promptText: cleanText,
       wordCount: words.length
     }];
   }
@@ -62,7 +59,7 @@ function splitTextIntoChunks(text, maxWords = 300) {
       const chunkText = currentChunk.join(' ');
       chunks.push({
         text: chunkText,
-        promptText: `${speakerPrefix} : ${chunkText}`,
+        promptText: chunkText,
         wordCount: currentWordCount
       });
       currentChunk = [trimmed];
@@ -77,7 +74,7 @@ function splitTextIntoChunks(text, maxWords = 300) {
     const chunkText = currentChunk.join(' ');
     chunks.push({
       text: chunkText,
-      promptText: `${speakerPrefix} : ${chunkText}`,
+      promptText: chunkText,
       wordCount: currentWordCount
     });
   }

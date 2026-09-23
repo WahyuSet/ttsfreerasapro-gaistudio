@@ -74,11 +74,13 @@ async function dismissPopups(page) {
  */
 async function selectVoicePill(page, pillName, targetVal) {
   if (!targetVal) return;
-  if (pillName.toLowerCase() === 'accent') {
-    console.log('[TtsEngine] Mengabaikan pemilihan Accent sesuai preferensi.');
-    return;
+
+  let resolvedVal = String(targetVal).trim();
+  if (pillName.toLowerCase() === 'accent' && (/neutral/i.test(resolvedVal) || /default/i.test(resolvedVal))) {
+    resolvedVal = 'Neutral';
   }
-  console.log(`[TtsEngine] Memilih ${pillName}: "${targetVal}"...`);
+
+  console.log(`[TtsEngine] Memilih ${pillName}: "${resolvedVal}"...`);
 
   // 1. Tunggu overlay/backdrop sebelumnya selesai menutup
   await page.waitForSelector('.cdk-overlay-backdrop', { state: 'detached', timeout: 3500 }).catch(() => {});
@@ -94,8 +96,8 @@ async function selectVoicePill(page, pillName, targetVal) {
   // 3. Cek Idempotency
   const currentText = await pillBtn.innerText().catch(() => '');
   const currentAria = await pillBtn.getAttribute('aria-label').catch(() => '');
-  if (isPillValueMatching(currentText, targetVal) || (isPillValueMatching(currentAria, targetVal) && !currentAria.toLowerCase().endsWith(pillName.toLowerCase()))) {
-    console.log(`[TtsEngine] ${pillName} sudah bernilai "${targetVal}" (idempotent, lewati pemilihan).`);
+  if (isPillValueMatching(currentText, resolvedVal) || (isPillValueMatching(currentAria, resolvedVal) && !currentAria.toLowerCase().endsWith(pillName.toLowerCase()))) {
+    console.log(`[TtsEngine] ${pillName} sudah bernilai "${resolvedVal}" (idempotent, lewati pemilihan).`);
     return;
   }
 
@@ -113,8 +115,8 @@ async function selectVoicePill(page, pillName, targetVal) {
   const overlayPanes = page.locator('.cdk-overlay-container .cdk-overlay-pane');
   const activePane = overlayPanes.last();
 
-  const exactRegex = new RegExp(`^\\s*${targetVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
-  const wordRegex = new RegExp(`\\b${targetVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+  const exactRegex = new RegExp(`^\\s*${resolvedVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i');
+  const wordRegex = new RegExp(`\\b${resolvedVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
 
   let optionBtn = activePane.locator('[role="menuitem"], .mat-mdc-menu-item, button').filter({ hasText: exactRegex }).first();
   if (!(await optionBtn.isVisible({ timeout: 1500 }).catch(() => false))) {
@@ -124,16 +126,16 @@ async function selectVoicePill(page, pillName, targetVal) {
     optionBtn = activePane.locator('[role="menuitem"], .mat-mdc-menu-item, button').filter({ hasText: wordRegex }).first();
   }
   if (!(await optionBtn.isVisible({ timeout: 1500 }).catch(() => false))) {
-    optionBtn = page.locator(`.cdk-overlay-container [role="menuitem"]:has-text("${targetVal}"), .cdk-overlay-container button:has-text("${targetVal}")`).last();
+    optionBtn = page.locator(`.cdk-overlay-container [role="menuitem"]:has-text("${resolvedVal}"), .cdk-overlay-container button:has-text("${resolvedVal}")`).last();
   }
 
   if (await optionBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
     await optionBtn.scrollIntoViewIfNeeded().catch(() => {});
     await optionBtn.click({ force: true }).catch(async () => await optionBtn.click());
-    console.log(`[TtsEngine] Klik opsi "${targetVal}" pada menu ${pillName}.`);
+    console.log(`[TtsEngine] Klik opsi "${resolvedVal}" pada menu ${pillName}.`);
   } else {
     await page.keyboard.press('Escape').catch(() => {});
-    console.warn(`[TtsEngine] Opsi "${targetVal}" tidak ditemukan dalam menu dropdown ${pillName}, melanjutkan.`);
+    console.warn(`[TtsEngine] Opsi "${resolvedVal}" tidak ditemukan dalam menu dropdown ${pillName}, melanjutkan.`);
   }
 
   // 7. Tunggu backdrop menutup sepenuhnya
@@ -143,7 +145,7 @@ async function selectVoicePill(page, pillName, targetVal) {
   // 8. Postcondition Verification
   const verifiedText = await pillBtn.innerText().catch(() => '');
   const verifiedAria = await pillBtn.getAttribute('aria-label').catch(() => '');
-  const isVerified = isPillValueMatching(verifiedText, targetVal) || isPillValueMatching(verifiedAria, targetVal);
+  const isVerified = isPillValueMatching(verifiedText, resolvedVal) || isPillValueMatching(verifiedAria, resolvedVal);
 
   if (!isVerified) {
     console.warn(`[TtsEngine] Postcondition notice untuk ${pillName}: aktual="${verifiedText}" (aria="${verifiedAria}"). Melanjutkan.`);

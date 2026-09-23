@@ -3,15 +3,15 @@ const { TtsEngine } = require('../src/tts-engine');
 async function testOnce() {
   const engine = new TtsEngine();
   const params = {
-    text: 'Halo semuanya!, ini adalah jamu biji segar.',
-    voice: 'Achernar',
-    style: 'Vocal Smile',
+    text: 'Halo semuanya! Selamat datang di pengujian Text to Speech otomatis Google AI Studio.',
+    voice: 'Zephyr',
+    style: 'Promo/Hype',
     pace: 'Natural',
     accent: 'Neutral',
     persona: 'A relaxed and engaging storyteller, talking like a close friend sharing cool trivia, upbeat and lighthearted.',
     autoChunk: true,
     maxWordsPerChunk: 300,
-    keepOpen: true
+    keepOpen: false
   };
 
   try {
