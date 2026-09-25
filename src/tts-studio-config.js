@@ -35,9 +35,9 @@ function normalizeVoiceName(name) {
   return trimmed;
 }
 
-const HARDCODED_SCENE = 'A modern study room, explaining everyday science concepts to curious peers.';
-const HARDCODED_SAMPLE_CONTEXT = 'Warm, encouraging, speaking like an older sibling sharing cool trivia, upbeat yet gentle pacing.';
-const HARDCODED_PERSONA = 'A relaxed and engaging storyteller, talking like a close friend sharing cool trivia, upbeat and lighthearted.';
+const HARDCODED_SCENE = 'A modern content creator studio. Casual, well-lit, and energetic atmosphere.';
+const HARDCODED_SAMPLE_CONTEXT = 'TikTok educational content. Fast-paced, punchy, conversational, and engaging. Direct address to the audience with curious questioning at the start and a clear, satisfying explanation.';
+const HARDCODED_PERSONA = 'A relaxed, friendly young adult hanging out with close friends. Warm, casual, and natural conversational cadence.';
 
 /**
  * Konfigurasi lingkungan Studio Google AI TTS sebelum perenderan audio dimulai.
