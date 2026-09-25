@@ -10,8 +10,9 @@ Menggunakan arsitektur **Asynchronous Job Queue (Teknik Jobs)** sehingga aman da
 
 * **Base URL**: `http://localhost:3000` (atau port lain sesuai port terbuka, misal `3001`)
 * **Content-Type**: `application/json`
-* **Format Audio Output**: `.wav` (PCM kualitas studio tanpa kompresi pecah)
+* **Format Audio Output**: `.mp3` (192 kbps, konversi otomatis via `ffmpeg-static`) & `.wav` (PCM kualitas studio)
 * **Arsitektur Pemrosesan**: **Asynchronous Job Queue (Teknik Jobs)**
+* **Dukungan Teks Panjang**: **Auto-Chunking & Auto-Merging** (naskah panjang diproses per bagian lalu otomatis digabungkan menjadi **1 berkas MP3 utuh**)
 
 ---
 
@@ -50,12 +51,13 @@ sequenceDiagram
         API-->>Client: 200 OK { status: "processing", progress: 65% }
     end
 
-    Eng-->>JM: Audio tersimpan (.wav)
+    Eng-->>JM: Audio tersimpan (.mp3) & Auto-Merge 1 File
     JM-->>JM: Status -> "completed"
 
     Client->>API: GET /api/tts/jobs/:id
-    API-->>Client: 200 OK { status: "completed", audio_url: "..." }
-    Client->>API: GET /api/tts/download/:filename (Stream / Unduh Audio)
+    API-->>Client: 200 OK { status: "completed", audio_url: "..._merged.mp3" }
+    Client->>API: GET /api/tts/download/:filename (Stream / Unduh 1 Berkas MP3 Gabungan)
+    Client->>API: GET /api/tts/jobs/:id/audio (Direct Stream 1 File Utuh)
 ```
 
 ---
@@ -178,42 +180,74 @@ Mengecek status pengerjaan naskah berdasarkan ID pekerjaan. Saat berstatus `comp
 ```
 
 #### Contoh Response Saat Selesai (`status: "completed"`):
+> Jika naskah terdiri dari beberapa bagian (>300 kata), server otomatis menggabungkan seluruh bagian menjadi 1 berkas MP3 utuh (`mergedFile`). Nilai `audio_url`, `audioUrl`, dan `downloadUrl` langsung mengarah ke berkas gabungan tersebut.
+
 ```json
 {
   "success": true,
   "job": {
-    "id": "job_1788840812023_3fa32cbd",
+    "id": "job_1790307783764_3fa32cbd",
     "status": "completed",
     "progress": 100,
     "stage": "completed",
-    "message": "Pekerjaan selesai! Berkas audio siap diunduh.",
-    "durationSeconds": 38,
-    "createdAt": "2026-09-08T04:13:32.023Z",
-    "startedAt": "2026-09-08T04:13:33.100Z",
-    "completedAt": "2026-09-08T04:14:11.250Z",
+    "message": "Semua 2 bagian audio berhasil dibuat dan digabungkan menjadi 1 file MP3 utuh.",
+    "durationSeconds": 88,
+    "createdAt": "2026-09-25T14:20:00.000Z",
+    "startedAt": "2026-09-25T14:20:01.000Z",
+    "completedAt": "2026-09-25T14:21:29.000Z",
+    "audioUrl": "http://localhost:3000/api/tts/download/gemini_tts_1790307783764_merged.mp3",
+    "audio_url": "http://localhost:3000/api/tts/download/gemini_tts_1790307783764_merged.mp3",
+    "downloadUrl": "http://localhost:3000/api/tts/download/gemini_tts_1790307783764_merged.mp3",
+    "mergedFile": {
+      "filename": "gemini_tts_1790307783764_merged.mp3",
+      "url": "http://localhost:3000/api/tts/download/gemini_tts_1790307783764_merged.mp3",
+      "audio_url": "http://localhost:3000/api/tts/download/gemini_tts_1790307783764_merged.mp3",
+      "sizeBytes": 3812249,
+      "sizeKb": "3722.9",
+      "isMerged": true,
+      "totalParts": 2
+    },
     "result": {
-      "url": "http://localhost:3000/api/tts/download/gemini_tts_1788840850123_part1.wav",
-      "audio_url": "http://localhost:3000/api/tts/download/gemini_tts_1788840850123_part1.wav",
+      "url": "http://localhost:3000/api/tts/download/gemini_tts_1790307783764_merged.mp3",
+      "audio_url": "http://localhost:3000/api/tts/download/gemini_tts_1790307783764_merged.mp3",
+      "audioUrl": "http://localhost:3000/api/tts/download/gemini_tts_1790307783764_merged.mp3",
       "audio_urls": [
-        "http://localhost:3000/api/tts/download/gemini_tts_1788840850123_part1.wav"
+        "http://localhost:3000/api/tts/download/gemini_tts_1790307783764_part1.mp3",
+        "http://localhost:3000/api/tts/download/gemini_tts_1790307783764_part2.mp3"
       ],
-      "totalChunks": 1,
+      "totalChunks": 2,
       "voiceSettings": {
-        "voice": "Achernar",
+        "voice": "Zephyr",
         "style": "Vocal Smile",
         "pace": "Natural",
         "accent": "Neutral"
       },
+      "mergedFile": {
+        "filename": "gemini_tts_1790307783764_merged.mp3",
+        "url": "http://localhost:3000/api/tts/download/gemini_tts_1790307783764_merged.mp3",
+        "sizeBytes": 3812249,
+        "sizeKb": "3722.9",
+        "isMerged": true,
+        "totalParts": 2
+      },
       "files": [
         {
           "partIndex": 1,
-          "totalParts": 1,
-          "filename": "gemini_tts_1788840850123_part1.wav",
-          "url": "http://localhost:3000/api/tts/download/gemini_tts_1788840850123_part1.wav",
-          "sizeBytes": 245760,
-          "sizeKb": "240.0",
-          "textSnippet": "Speaker 1 : Halo semuanya! Selamat datang di channel kita...",
-          "wordCount": 16
+          "totalParts": 2,
+          "filename": "gemini_tts_1790307783764_part1.mp3",
+          "url": "http://localhost:3000/api/tts/download/gemini_tts_1790307783764_part1.mp3",
+          "sizeBytes": 2439372,
+          "sizeKb": "2382.2",
+          "wordCount": 299
+        },
+        {
+          "partIndex": 2,
+          "totalParts": 2,
+          "filename": "gemini_tts_1790307783764_part2.mp3",
+          "url": "http://localhost:3000/api/tts/download/gemini_tts_1790307783764_part2.mp3",
+          "sizeBytes": 1373280,
+          "sizeKb": "1341.1",
+          "wordCount": 150
         }
       ]
     }
@@ -294,16 +328,24 @@ curl -X POST "http://localhost:3000/api/tts/generate?sync=true" \
 
 ---
 
-### 6. `GET /api/tts/download/:filename`
-Memutar (*stream*) atau mengunduh berkas audio `.wav` langsung via URL.
+### 6. `GET /api/tts/jobs/:id/audio` (Ambil / Stream 1 Berkas Audio Utuh Berdasarkan Job ID)
+Endpoint terpadu untuk mengambil atau memutar langsung file audio hasil pekerjaan TTS (kompatibel dengan standar API seperti ElevenLabs).
+* Jika naskah dipotong menjadi banyak bagian (multi-chunk), endpoint ini **otomatis menyajikan 1 berkas MP3 hasil penggabungan utuh**.
+* **Direct Stream**: `GET /api/tts/jobs/:id/audio`
+* **Download Attachment**: `GET /api/tts/jobs/:id/audio?download=1`
 
-* **URL Contoh**: `http://localhost:3000/api/tts/download/gemini_tts_1788840850123_part1.wav`
+---
+
+### 7. `GET /api/tts/download/:filename`
+Memutar (*stream*) atau mengunduh berkas audio `.mp3` atau `.wav` langsung via URL nama file atau ID pekerjaan.
+
+* **URL Contoh**: `http://localhost:3000/api/tts/download/gemini_tts_1790307783764_merged.mp3`
 * **Direct Audio Stream**: Mendukung HTTP Range (`Accept-Ranges: bytes`) untuk pemutar HTML5 audio (`<audio src="...">`), streaming player, dan scrubbing.
 * **Download Attachment**: Berikan query `?download=1` untuk memaksa unduh sebagai file attachment.
 
 ---
 
-### 7. `GET /api/health` & `GET /api/tts/status`
+### 8. `GET /api/health` & `GET /api/tts/status`
 Mengecek kondisi server, status mesin TTS, dan statistik antrian.
 
 #### Contoh Response `GET /api/health`:

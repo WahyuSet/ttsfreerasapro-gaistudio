@@ -49,7 +49,7 @@ async function downloadFile({
   try {
     if (!activeBlobSrc) {
       const pollStart = Date.now();
-      while (Date.now() - pollStart < 8000 && !page.isClosed()) {
+      while (Date.now() - pollStart < 1500 && !page.isClosed()) {
         const targetAudio = await findTargetAudioElement(page, baselineSnapshot);
         if (targetAudio && (targetAudio.currentSrc || targetAudio.src)) {
           activeBlobSrc = targetAudio.currentSrc || targetAudio.src;

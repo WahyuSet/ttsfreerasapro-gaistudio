@@ -43,29 +43,29 @@ async function renderChunkAudio(page, chunk, options) {
   // Siapkan listener respons jaringan backend Google AI Studio
   let apiDone = false;
   let apiTimestamp = 0;
-  page.on('response', async res => {
+  let apiResponseResolver = null;
+  const apiResponsePromise = new Promise(resolve => {
+    apiResponseResolver = resolve;
+  });
+
+  const responseHandler = async res => {
     try {
       const u = res.url();
       if (res.status() >= 400 && (u.includes('alkalimakersuite') || u.includes('generate-speech') || u.includes('predict') || u.includes('googleapis'))) {
         const body = await res.text().catch(() => '');
         console.error(`\n[TtsEngine] ❌ Google API Error ${res.status()}: ${body.slice(0, 500)}\n`);
       }
+      if ((u.includes('alkalimakersuite') || u.includes('generate-speech') || u.includes('predict')) && res.status() === 200) {
+        console.log(`[TtsEngine] Backend API TTS respons diterima (${res.status()}).`);
+        apiDone = true;
+        apiTimestamp = Date.now();
+        if (apiResponseResolver) apiResponseResolver(res);
+      }
     } catch {}
-  });
+  };
+  page.on('response', responseHandler);
 
-  const apiResponsePromise = page.waitForResponse(res => {
-    const u = res.url();
-    return (u.includes('alkalimakersuite') || u.includes('generate-speech') || u.includes('predict')) && res.status() === 200;
-  }, { timeout: 180000 }).catch(() => null);
-
-  apiResponsePromise.then(res => {
-    if (res) {
-      console.log(`[TtsEngine] Backend API TTS respons diterima (${res.status()}).`);
-      apiDone = true;
-      apiTimestamp = Date.now();
-    }
-  });
-
+  try {
   // 3. Klik tombol RUN
   onProgress({
     stage: 'rendering',
@@ -286,6 +286,11 @@ async function renderChunkAudio(page, chunk, options) {
   const debugImg = path.join(downloadsDir, `debug_download_failed_part${chunk.index}_${Date.now()}.png`);
   await page.screenshot({ path: debugImg, fullPage: true }).catch(() => {});
   throw new Error(`File audio bagian ${chunk.index} gagal diunduh. Screenshot debug disimpan di ${path.basename(debugImg)}`);
+  } finally {
+    try {
+      page.off('response', responseHandler);
+    } catch {}
+  }
 }
 
 module.exports = {

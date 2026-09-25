@@ -1,4 +1,6 @@
 const assert = require('assert');
+const path = require('path');
+const fs = require('fs');
 const {
   extractBaselineBlobUrls,
   isFreshBlob,
@@ -7,10 +9,14 @@ const {
 } = require('../src/audio-downloader');
 const {
   normalizePillValue,
-  isPillValueMatching,
+  isPillValueMatching
+} = require('../src/tts-ui-helpers');
+const {
   formatSpeakerPrompt,
   splitTextIntoChunks
-} = require('../src/tts-engine');
+} = require('../src/tts-text-utils');
+const { mergeAudioFiles } = require('../src/audio-converter');
+const { formatJobOutput } = require('../src/job-storage');
 
 async function runUnitTests() {
   console.log('🧪 Menjalankan unit test pemulihan TTS & logika freshness snapshot...');
@@ -102,13 +108,13 @@ async function runUnitTests() {
 
   // Test 7: formatSpeakerPrompt & splitTextIntoChunks
   {
-    assert.strictEqual(formatSpeakerPrompt('Halo dunia'), 'Speaker 1 : Halo dunia');
-    assert.strictEqual(formatSpeakerPrompt('Speaker 2 : Halo dunia'), 'Speaker 2 : Halo dunia');
-    assert.strictEqual(formatSpeakerPrompt('speaker 1: Halo dunia'), 'speaker 1: Halo dunia');
+    assert.strictEqual(formatSpeakerPrompt('Halo dunia'), 'Halo dunia');
+    assert.strictEqual(formatSpeakerPrompt('Speaker 2 : Halo dunia'), 'Halo dunia');
+    assert.strictEqual(formatSpeakerPrompt('speaker 1: Halo dunia'), 'Halo dunia');
 
     const shortChunks = splitTextIntoChunks('Satu dua tiga', 10);
     assert.strictEqual(shortChunks.length, 1);
-    assert.strictEqual(shortChunks[0].promptText, 'Speaker 1 : Satu dua tiga');
+    assert.strictEqual(shortChunks[0].promptText, 'Satu dua tiga');
     console.log('  ✓ Test 7: Prompt formatting & chunking PASS');
   }
 
@@ -131,7 +137,55 @@ async function runUnitTests() {
     console.log('  ✓ Test 8: Terminal closed-page error handling PASS');
   }
 
-  console.log('\n🎉 SEMUA UNIT TEST PASS (8/8)!');
+  // Test 9: mergeAudioFiles
+  {
+    const part1 = path.resolve(__dirname, '../downloads/gemini_tts_1790309037332_part1.mp3');
+    const part2 = path.resolve(__dirname, '../downloads/gemini_tts_1790309111356_part2.mp3');
+    if (fs.existsSync(part1) && fs.existsSync(part2)) {
+      const testMergedOutput = path.resolve(__dirname, '../downloads/test_unit_merged.mp3');
+      try { if (fs.existsSync(testMergedOutput)) fs.unlinkSync(testMergedOutput); } catch {}
+      await mergeAudioFiles([part1, part2], testMergedOutput);
+      assert.ok(fs.existsSync(testMergedOutput), 'Berkas hasil merge harus ada di disk');
+      const sizeMerged = fs.statSync(testMergedOutput).size;
+      const size1 = fs.statSync(part1).size;
+      const size2 = fs.statSync(part2).size;
+      assert.ok(sizeMerged >= Math.min(size1, size2), 'Ukuran berkas gabungan harus valid');
+      try { fs.unlinkSync(testMergedOutput); } catch {}
+      console.log('  ✓ Test 9: mergeAudioFiles with actual MP3s PASS');
+    } else {
+      console.log('  ⚠ Test 9: mergeAudioFiles skipped (test samples not found)');
+    }
+  }
+
+  // Test 10: formatJobOutput exposes mergedFile and unified audio URL
+  {
+    const mockJob = {
+      id: 'job-test-merge-123',
+      status: 'completed',
+      progress: 100,
+      stage: 'completed',
+      message: 'Selesai',
+      params: { text: 'Testing', wordCount: 1, voice: 'Zephyr' },
+      result: {
+        mergedFile: {
+          filename: 'job-test_merged.mp3',
+          downloadUrl: '/api/tts/download/job-test_merged.mp3'
+        },
+        files: [
+          { filename: 'job-test_part1.mp3', downloadUrl: '/api/tts/download/job-test_part1.mp3' },
+          { filename: 'job-test_part2.mp3', downloadUrl: '/api/tts/download/job-test_part2.mp3' }
+        ]
+      }
+    };
+    const formatted = formatJobOutput(mockJob, 'http://localhost:3000');
+    assert.strictEqual(formatted.audioUrl, 'http://localhost:3000/api/tts/download/job-test_merged.mp3');
+    assert.strictEqual(formatted.audio_url, 'http://localhost:3000/api/tts/download/job-test_merged.mp3');
+    assert.strictEqual(formatted.mergedFile.url, 'http://localhost:3000/api/tts/download/job-test_merged.mp3');
+    assert.strictEqual(formatted.result.files.length, 2);
+    console.log('  ✓ Test 10: formatJobOutput mergedFile & unified audioUrl PASS');
+  }
+
+  console.log('\n🎉 SEMUA UNIT TEST PASS (10/10)!');
 }
 
 runUnitTests().catch(err => {

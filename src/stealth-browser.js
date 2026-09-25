@@ -98,7 +98,7 @@ async function launchStealthChrome(options = {}) {
     '--no-default-browser-check',
     '--disable-gpu',
     '--disable-gpu-compositing',
-    '--disable-features=DownloadBubble,DownloadBubbleV2,CalculateNativeWinOcclusion',
+    '--disable-features=CalculateNativeWinOcclusion',
     '--disable-backgrounding-occluded-windows',
     ...(muteAudio ? ['--mute-audio'] : []),
     ...(offscreen && !headless

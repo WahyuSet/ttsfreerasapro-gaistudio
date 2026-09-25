@@ -72,21 +72,24 @@ Untuk menguji dan memastikan seluruh langkah berjalan otomatis dari awal sampai 
 Cukup **klik 2x**:
 👉 **`TEST_TTS_API.bat`**
 - Menguji endpoint REST API TTS (`/api/tts/jobs`) secara live.
-- Memantau progres job hingga selesai dan memverifikasi file audio `.wav` terunduh di folder `downloads/`.
+- Memantau progres job hingga selesai dan memverifikasi file audio MP3 (192 kbps) terunduh di folder `downloads/`.
 
 ### 📦 Layanan REST API Gemini TTS (Arsitektur Asynchronous Jobs):
 Server REST API lokal yang menyediakan pembuatan suara sintetis Gemini 2.5 Pro TTS dengan **Teknik Jobs (Asynchronous Job Queue)**:
 - Menghindari kendala HTTP timeout untuk render audio durasi lama / multi-chunk.
+- **Auto-Chunking & Auto-Merging**: Naskah panjang (>300 kata) otomatis dipecah menjadi beberapa bagian, diproses secara andal, dan otomatis digabungkan menjadi **1 berkas audio MP3 utuh** (`mergedFile`).
+- **Konversi Otomatis MP3 192 kbps**: Hasil render WAV dari AI Studio langsung dikonversi ke format MP3 berkualitas tinggi secara native tanpa window popup.
 - Memberikan respons instan `202 Accepted` dengan `jobId` dan `statusUrl`.
-- Pelacakan progres live `0% - 100%` (`initializing` ➔ `configuring` ➔ `rendering` ➔ `downloading`).
+- Pelacakan progres live `0% - 100%` (`initializing` ➔ `configuring` ➔ `rendering` ➔ `downloading` ➔ `merging`).
 - Dukungan WebSocket live broadcasting untuk web dashboard.
 - Endpoint utama:
   - `POST /api/tts/jobs` — Submit tugas TTS baru (Async Job).
   - `GET /api/tts/jobs/:id` — Cek status & ambil berkas audio.
+  - `GET /api/tts/jobs/:id/audio` — Stream / unduh langsung 1 file audio utuh.
   - `GET /api/tts/jobs` — Riwayat & statistik antrian.
   - `DELETE /api/tts/jobs/:id` — Batalkan tugas yang sedang antre.
   - `POST /api/tts/generate` — Endpoint fleksibel (dukung `?sync=true` atau mode jobs).
-- Untuk dokumentasi lengkap dan contoh kode (Node.js, Python, PowerShell, cURL), baca [API_DOCUMENTATION.md](file:///c:/Users/Jerry/Documents/CODING/austudio-playwright/API_DOCUMENTATION.md).
+- Untuk dokumentasi lengkap dan contoh kode (Node.js, Python, PowerShell, cURL), baca [API_DOCUMENTATION.md](API_DOCUMENTATION.md).
 
 Untuk menjalankan server API:
 Cukup klik 2x 👉 **`START_SERVER.bat`** (atau jalankan `npm start`).

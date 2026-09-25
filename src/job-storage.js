@@ -65,6 +65,7 @@ function formatJobOutput(job, baseUrl = '', queuePosition = 0) {
 
   let formattedResult = null;
   let primaryAudioUrl = null;
+  let formattedMergedFile = null;
 
   if (job.result) {
     const files = (job.result.files || []).map(f => {
@@ -79,7 +80,20 @@ function formatJobOutput(job, baseUrl = '', queuePosition = 0) {
       };
     });
 
-    primaryAudioUrl = files[0] ? files[0].url : (job.result.url || null);
+    if (job.result.mergedFile) {
+      const m = job.result.mergedFile;
+      const downloadUrl = m.downloadUrl || `/api/tts/download/${m.filename}`;
+      const fullUrl = baseUrl && !downloadUrl.startsWith('http') ? `${baseUrl}${downloadUrl}` : downloadUrl;
+      formattedMergedFile = {
+        ...m,
+        downloadUrl,
+        url: fullUrl,
+        audio_url: fullUrl,
+        audioUrl: fullUrl
+      };
+    }
+
+    primaryAudioUrl = formattedMergedFile ? formattedMergedFile.url : (files[0] ? files[0].url : (job.result.url || null));
     const allUrls = files.map(f => f.url);
 
     formattedResult = {
@@ -89,6 +103,7 @@ function formatJobOutput(job, baseUrl = '', queuePosition = 0) {
       audio_urls: allUrls.length > 0 ? allUrls : (job.result.audio_urls || []),
       totalChunks: job.result.totalChunks || files.length,
       voiceSettings: job.result.voiceSettings,
+      mergedFile: formattedMergedFile,
       files: files
     };
   }
@@ -124,6 +139,7 @@ function formatJobOutput(job, baseUrl = '', queuePosition = 0) {
       autoChunk: job.params.autoChunk,
       maxWordsPerChunk: job.params.maxWordsPerChunk
     },
+    mergedFile: formattedMergedFile,
     result: formattedResult,
     error: job.error,
     statusUrl

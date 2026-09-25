@@ -101,6 +101,7 @@ function createTtsRouter({ jobManager, ttsEngine, getBaseUrl }) {
           audio_urls: formatted.result ? formatted.result.audio_urls : [],
           totalChunks: formatted.result ? formatted.result.totalChunks : 1,
           voiceSettings: formatted.result ? formatted.result.voiceSettings : {},
+          mergedFile: formatted.result ? formatted.result.mergedFile : null,
           files: formatted.result ? formatted.result.files : [],
           durationSeconds: formatted.durationSeconds
         });
@@ -144,7 +145,7 @@ function createTtsRouter({ jobManager, ttsEngine, getBaseUrl }) {
       });
     }
 
-    if (job.status !== 'completed' || !job.result || !Array.isArray(job.result.files) || job.result.files.length === 0) {
+    if (job.status !== 'completed' || !job.result || (!job.result.mergedFile && (!Array.isArray(job.result.files) || job.result.files.length === 0))) {
       return res.status(409).json({
         success: false,
         error: 'Berkas audio belum siap atau pekerjaan belum selesai.',
@@ -153,7 +154,7 @@ function createTtsRouter({ jobManager, ttsEngine, getBaseUrl }) {
       });
     }
 
-    const fileObj = job.result.files[0];
+    const fileObj = job.result.mergedFile || job.result.files[0];
     let filePath = fileObj.filePath;
     if (!filePath || !fs.existsSync(filePath)) {
       filePath = path.join(ttsEngine.downloadsDir, fileObj.filename);
@@ -201,18 +202,20 @@ function createTtsRouter({ jobManager, ttsEngine, getBaseUrl }) {
     if (!fs.existsSync(filePath)) {
       const cleanId = filename.replace(/\.(mp3|wav)$/i, '');
       const job = jobManager.jobs.get(cleanId) || jobManager.jobs.get(filename);
-      if (job && job.result && Array.isArray(job.result.files) && job.result.files.length > 0) {
-        const fileObj = job.result.files[0];
-        const possiblePath = fileObj.filePath || path.join(ttsEngine.downloadsDir, fileObj.filename);
-        if (fs.existsSync(possiblePath)) {
-          filePath = possiblePath;
-          filename = fileObj.filename;
-        } else {
-          // Coba cari berkas dengan nama yang sama berektensi .mp3 jika ada
-          const altMp3 = path.join(ttsEngine.downloadsDir, `${path.parse(fileObj.filename).name}.mp3`);
-          if (fs.existsSync(altMp3)) {
-            filePath = altMp3;
-            filename = path.basename(altMp3);
+      if (job && job.result) {
+        const fileObj = job.result.mergedFile || (Array.isArray(job.result.files) && job.result.files[0]);
+        if (fileObj) {
+          const possiblePath = fileObj.filePath || path.join(ttsEngine.downloadsDir, fileObj.filename);
+          if (fs.existsSync(possiblePath)) {
+            filePath = possiblePath;
+            filename = fileObj.filename;
+          } else {
+            // Coba cari berkas dengan nama yang sama berektensi .mp3 jika ada
+            const altMp3 = path.join(ttsEngine.downloadsDir, `${path.parse(fileObj.filename).name}.mp3`);
+            if (fs.existsSync(altMp3)) {
+              filePath = altMp3;
+              filename = path.basename(altMp3);
+            }
           }
         }
       }
