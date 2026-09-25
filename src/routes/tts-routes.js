@@ -258,6 +258,7 @@ function createTtsRouter({ jobManager, ttsEngine, getBaseUrl }) {
       defaultVoice: 'Zephyr',
       voices: [
         { name: 'Zephyr', gender: 'Dynamic', isDefault: true, description: 'Calm, smooth, versatile, and balanced (Default)' },
+        { name: 'Puck', gender: 'Male', isDefault: false, description: 'Playful, witty, and mischievous' },
         { name: 'Charon', gender: 'Male', isDefault: false, description: 'Deep, authoritative, and steady' },
         { name: 'Achird', gender: 'Female', isDefault: false, description: 'Gentle, thoughtful, and clear' },
         { name: 'Fenrir', gender: 'Male', isDefault: false, description: 'Energetic, bold, and powerful' },

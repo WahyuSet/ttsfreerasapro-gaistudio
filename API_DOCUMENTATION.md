@@ -102,7 +102,7 @@ x-api-key: IkPzTzClQrVGj73OMWIm7TPkRTHnlj7M
 | Parameter | Tipe Data | Wajib? | Default | Keterangan |
 | :--- | :--- | :--- | :--- | :--- |
 | `text` | `string` | **Ya** | - | Naskah suara yang akan dibaca. |
-| `voice` | `string` | Opsional | `"Zephyr"` | Nama karakter suara (pilihan: `Zephyr` [default], `Charon`, `Achird`, `Fenrir`, `Iapetus`, `Orus`, `Rasalgethi`, `Achernar`, dll.). |
+| `voice` | `string` | Opsional | `"Zephyr"` | Nama karakter suara (pilihan: `Zephyr` [default], `Puck`, `Charon`, `Achird`, `Fenrir`, `Iapetus`, `Orus`, `Rasalgethi`, `Achernar`, dll.). |
 | `style` | `string` | Opsional | `"Vocal Smile"` | Gaya bicara (`Vocal Smile`, `Newscaster`, `Whisper`, `Empathetic`, `Promo/Hype`, `Deadpan`). |
 | `pace` | `string` | Opsional | `"Natural"` | Kecepatan (`Natural`, `Rapid Fire`, `The Drift`, `Staccato`). |
 | `accent` | `string` | Opsional | `"Neutral"` | Aksen pembawaan (`Neutral`, `American (Gen)`, `American (Valley)`, `American (South)`, `British (RP)`, `British (Brixton)`, `Transatlantic`, `Australian`). |
