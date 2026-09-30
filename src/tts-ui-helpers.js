@@ -50,7 +50,8 @@ async function dismissPopups(page) {
       'div[role="dialog"] button:has-text("I agree")',
       'div[role="dialog"] button:has-text("Got it")',
       'button[aria-label="Close"]',
-      'button[aria-label="Dismiss"]'
+      'button[aria-label="Dismiss"]',
+      'button[aria-label="Close guided tour"]'
     ];
 
     for (const selector of dialogBtnSelectors) {

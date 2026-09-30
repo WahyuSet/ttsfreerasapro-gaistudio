@@ -93,6 +93,15 @@ async function setupTtsStudio(page, params, onProgress, totalChunks) {
   await humanClick(page, templateSelector).catch(() => {});
   await humanDelay(1000, 1600);
 
+  // Kartu template bisa terpotong di tepi carousel sehingga klik koordinat meleset;
+  // fallback ke klik locator Playwright jika editor Scene belum muncul.
+  const sceneVisible = await page.locator('textarea[aria-label="Scene"]').isVisible().catch(() => false);
+  if (!sceneVisible) {
+    console.log('[TtsEngine] Klik template meleset, mencoba ulang dengan locator click...');
+    await page.locator(templateSelector).first().click().catch(() => {});
+    await humanDelay(1000, 1600);
+  }
+
   // 3. Switch ke Text Mode
   onProgress({
     stage: 'configuring',
